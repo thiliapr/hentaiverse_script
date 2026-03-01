@@ -3,7 +3,7 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, random
+import json, pathlib, random, re
 from typing import Literal, Callable
 from collections import defaultdict
 from utils.battle import BattleAPI
@@ -21,11 +21,16 @@ def try_to_use(api: BattleAPI, category: Literal["magic", "item"], name: str, *a
 
 
 def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list[str]], *args, **kwargs) -> list[str]:
-    # 记录攻击前的怪兽生命值，然后执行攻击，然后比较现在怪兽的生命和攻击前的生命，计算出每个怪兽的伤害
-    monster_health_before = [monster.health for monster in api.get_monsters()]
+    # 执行攻击
     textlog = method(*args, **kwargs)
-    monster_health_after = [monster.health for monster in api.get_monsters()]
-    current_damage_list = [before - after for before, after in zip(monster_health_before, monster_health_after) if before != after]
+    # 分析伤害
+    current_damage_list = []
+    for log in textlog:
+        if (res := re.search(r"[\w ]+ [a-z]+s ([\w\W]+) for (\d+) (\w+ )?damage", log)) is not None:
+            monster_name, damage, _ = res.groups()
+            if any(monster.name == monster_name for monster in api.get_monsters()):
+                current_damage_list.append(int(damage))
+
     # EMA 更新数据（没打中一个怪兽就别记了）
     if current_damage_list:
         multiplier = 0.99
@@ -126,7 +131,7 @@ def battle():
 
         # 选择魔法和目标
         (best_magic, best_target), _ = max(target_score, key=lambda x: x[1])
-        if random.random() < 0.1:
+        if random.random() < 0.9:
             (best_magic, _), _ = random.choice(target_score)
         print(f"计划用 {best_magic.name} 打第 {best_target + 1} 个怪兽。")
 
