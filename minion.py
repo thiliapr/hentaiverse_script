@@ -131,7 +131,7 @@ def battle():
 
         # 选择魔法和目标
         (best_magic, best_target), _ = max(target_score, key=lambda x: x[1])
-        if random.random() < 0.9:
+        if random.random() < 0.3:
             (best_magic, _), _ = random.choice(target_score)
         print(f"计划用 {best_magic.name} 打第 {best_target + 1} 个怪兽。")
 
