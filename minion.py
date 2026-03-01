@@ -11,8 +11,8 @@ from utils.battle import BattleAPI
 damage_data_file = pathlib.Path("damage_data.json")
 config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
 damage_data = defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}) | json.loads(damage_data_file.read_text("utf-8"))
-heal_before_end_flag = False
-keep_buff = False
+heal_before_end_flag = True
+keep_buff = True
 
 
 def try_to_use(api: BattleAPI, category: Literal["magic", "item"], name: str, *args, **kwargs) -> list[str] | None:
@@ -120,8 +120,9 @@ def battle():
                 hit_number = len(window)
                 will_die = sum(monster.health < damage for monster in window)
                 damage_sum = sum(min(damage, monster.health) for monster in window)
+                damage_per_mana = damage_sum / attack_magic.mana_cost
                 # 添加进候选人名单
-                target_score.append(((attack_magic, monster_idx), (will_die, damage_sum, hit_number)))
+                target_score.append(((attack_magic, monster_idx), (will_die, damage_sum, hit_number, damage_per_mana)))
 
         # 选择魔法和目标
         (best_magic, best_target), _ = max(target_score, key=lambda x: x[1])
