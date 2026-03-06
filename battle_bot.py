@@ -71,12 +71,25 @@ def predict_damage(skill_id: str, monster: Monster) -> float:
     return skill_base_damage * multiplier
 
 
-def battle(heal_before_end_flag: bool, keep_buff: bool):
+def control_monster(api: BattleAPI, monster_idx: int, with_sleep: bool):
+    if not any(effect.name in (["Asleep"] if with_sleep else []) + ["Silenced", "Blinded", "Weakened"] for effect in api.get_monsters()[monster_idx].effects):
+        for magic_name in (["Sleep"] if with_sleep else []) + ["Silence", "Blind", "Weaken"]:
+            if try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
+                break
+
+
+def battle():
     api = BattleAPI(config["ipb_member_id"], config["ipb_pass_hash"], config["user_agent"])
 
-    # 检测是否适合当前脚本
-    if num_boss := sum(monster.health > 5000 for monster in api.get_monsters()):
-        raise RuntimeError(f"检测到 {num_boss} 个 Boss，建议手动操作——使用 Scan 技能查抗性，给怪兽加 Silenced Debuff，打它。")
+    # 检测是否需要结束前回血、是否需要叠 Buff
+    # 如果分析当前回合数和总回合数没有结果，说明战斗只持续一个回合
+    heal_before_end_flag = keep_buff = False
+    if (result := re.search(r"Round (\d+) / (\d+)", api.logs[0][-1])) is not None:
+        current_rounds, total_rounds = [int(x) for x in result.groups()]
+        if current_rounds < total_rounds:
+            heal_before_end_flag = True
+        if total_rounds > 5:
+            keep_buff = True
 
     while any(monster.health > 0 for monster in api.get_monsters()):
         # 保持 Buff
@@ -112,10 +125,7 @@ def battle(heal_before_end_flag: bool, keep_buff: bool):
             monster_idx, health = monster_health[0]
             if heal_before_end_flag and (api.get_player_health() < 2000 or api.get_player_mana() < 400):
                 # 给敌人打麻药
-                if not any(effect.name in ["Asleep", "Silenced", "Blinded", "Weakened"] for effect in api.get_monsters()[monster_idx].effects):
-                    for magic_name in ["Sleep", "Silence", "Blind", "Weaken"]:
-                        if try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
-                            break
+                control_monster(api, monster_idx, True)
                 # 救人
                 if api.get_player_health() < 2000:
                     if not try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID):
@@ -135,6 +145,13 @@ def battle(heal_before_end_flag: bool, keep_buff: bool):
             if health < predict_damage("Attack/Attack", api.get_monsters()[monster_idx]):
                 attack_with_logger(api, "Attack/Attack", api.do_attack, BattleAPI.MONSTER_START_ID + monster_idx)
                 continue
+
+        # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
+        bosses = [monster_idx for monster_idx, monster in enumerate(api.get_monsters()) if monster.health > 5000]
+        if len(bosses) == sum(monster.health > 0 for monster in api.get_monsters()):
+            for monster_idx in bosses:
+                # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
+                control_monster(api, monster_idx, False)
 
         # 攻击死最多的、伤害最多的、打中最多的
         target_score = []
@@ -181,4 +198,4 @@ def battle(heal_before_end_flag: bool, keep_buff: bool):
 
 if __name__ == "__main__":
     while True:
-        battle(True, True)
+        battle()
