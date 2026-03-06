@@ -6,13 +6,18 @@
 import json, pathlib, random, re
 from typing import Literal, Callable
 from collections import defaultdict
-from utils.battle import BattleAPI
+from utils.battle import BattleAPI, Monster
 
-damage_data_file = pathlib.Path("damage_data.json")
+EMA_MULTIPLIER = 0.99
+SKILL_DAMAGE_FILE = pathlib.Path("skill_damage_data.json")
+MONSTER_DAMAGE_FILE = pathlib.Path("monster_damage_data.json")
+
 config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
-damage_data = defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}) | json.loads(damage_data_file.read_text("utf-8"))
-heal_before_end_flag = True
-keep_buff = True
+skill_damage_data = defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}) | json.loads(SKILL_DAMAGE_FILE.read_text("utf-8"))
+monster_damage_data = defaultdict(lambda: defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}))
+# 手动更新 monster 信息，否则会覆盖第二级 defaultdict
+for skill_id, skill_data in json.loads(MONSTER_DAMAGE_FILE.read_text("utf-8")).items():
+    monster_damage_data[skill_id] |= skill_data
 
 
 def try_to_use(api: BattleAPI, category: Literal["magic", "item"], name: str, *args, **kwargs) -> list[str] | None:
@@ -23,29 +28,50 @@ def try_to_use(api: BattleAPI, category: Literal["magic", "item"], name: str, *a
 def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list[str]], *args, **kwargs) -> list[str]:
     # 执行攻击
     textlog = method(*args, **kwargs)
+
     # 分析伤害
-    current_damage_list = []
+    damage_list = []
+    monster_ids = []
     for log in textlog:
         if (res := re.search(r"[\w ]+ [a-z]+s ([\w\W]+) for (\d+) (\w+ )?damage", log)) is not None:
             monster_name, damage, _ = res.groups()
-            if any(monster.name == monster_name for monster in api.get_monsters()):
-                current_damage_list.append(int(damage))
+            if (monster_id := next((monster.monster_id for monster in api.get_monsters() if monster.name == monster_name), None)) is not None:
+                damage_list.append(int(damage))
+                monster_ids.append(monster_id)
 
-    # EMA 更新数据（没打中一个怪兽就别记了）
-    if current_damage_list:
-        multiplier = 0.99
-        damage_data[skill_id]["damage_sum"] = damage_data[skill_id]["damage_sum"] * multiplier + sum(current_damage_list) / len(current_damage_list)
-        damage_data[skill_id]["weight_sum"] = damage_data[skill_id]["weight_sum"] * multiplier + 1
+    # 更新技能数据（没打中一个怪兽就别记了）
+    skill_data = skill_damage_data[skill_id]
+    if damage_list:
+        value = sum(damage_list) / len(damage_list)
+        skill_data["damage_sum"] = skill_data["damage_sum"] * EMA_MULTIPLIER + value
+        skill_data["weight_sum"] = skill_data["weight_sum"] * EMA_MULTIPLIER + 1
+
+    # 更新怪兽数据，用技能基础伤害的倍数表示
+    skill_base_damage = skill_data["damage_sum"] / skill_data["weight_sum"]
+    for damage, monster_id in zip(damage_list, monster_ids):
+        monster_data = monster_damage_data[skill_id][str(monster_id)]
+        value = damage / skill_base_damage
+        monster_data["damage_sum"] = monster_data["damage_sum"] * EMA_MULTIPLIER + value
+        monster_data["weight_sum"] = monster_data["weight_sum"] * EMA_MULTIPLIER + 1
+
     return textlog
 
 
-def predict_damage(skill_id: str) -> float:
-    if skill_id in damage_data:
-        return damage_data[skill_id]["damage_sum"] / damage_data[skill_id]["weight_sum"]
-    return 2000 if skill_id.startswith("Magic/") else 800
+def predict_damage(skill_id: str, monster: Monster) -> float:
+    # 获取技能伤害
+    if skill_id not in skill_damage_data:
+        return 2000 if skill_id.startswith("Magic/") else 800
+    skill_base_damage = skill_damage_data[skill_id]["damage_sum"] / skill_damage_data[skill_id]["weight_sum"]
+
+    # 获取技能对怪兽的伤害
+    if str(monster.monster_id) not in (skill_data := monster_damage_data[skill_id]):
+        return skill_base_damage
+    monster_data = skill_data[str(monster.monster_id)]
+    multiplier = monster_data["damage_sum"] / monster_data["weight_sum"]
+    return skill_base_damage * multiplier
 
 
-def battle():
+def battle(heal_before_end_flag: bool, keep_buff: bool):
     api = BattleAPI(config["ipb_member_id"], config["ipb_pass_hash"], config["user_agent"])
 
     # 检测是否适合当前脚本
@@ -60,13 +86,13 @@ def battle():
                     try_to_use(api, "item", item_name)
 
         # 保命
-        if api.get_player_health() < 900:
+        if api.get_player_health() < 1000:
             for item_name in ["Health Gem", "Health Potion"]:
                 if try_to_use(api, "item", item_name):
                     break
             else:
                 try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID)
-        elif api.get_player_health() < 1500:
+        elif api.get_player_health() < 1900:
             try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID)
 
         # 回蓝
@@ -82,32 +108,33 @@ def battle():
 
         # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
         monster_health = [(idx, monster.health) for idx, monster in enumerate(api.get_monsters()) if monster.health > 0]
-        if len(monster_health) == 1 and heal_before_end_flag and (api.get_player_health() < 2000 or api.get_player_mana() < 400):
-            # 给敌人打麻药
-            if not any(effect.name in ["Asleep", "Silenced", "Blinded", "Weakened"] for effect in api.get_monsters()[monster_idx].effects):
-                for magic_name in ["Sleep", "Silence", "Blind", "Weaken"]:
-                    if try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
-                        break
-            # 救人
-            if api.get_player_health() < 2000:
-                if not try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID):
-                    for item_name in ["Health Gem", "Health Potion"]:
-                        try_to_use(api, "item", item_name)
-                        break
-            # 回蓝
-            if api.get_player_mana() < 400:
-                for item_name in ["Mana Gem", "Mana Potion"]:
-                    if try_to_use(api, "item", item_name):
-                        break
-                else:
-                    api.do_defend()
-            continue
+        if len(monster_health) == 1:
+            monster_idx, health = monster_health[0]
+            if heal_before_end_flag and (api.get_player_health() < 2000 or api.get_player_mana() < 400):
+                # 给敌人打麻药
+                if not any(effect.name in ["Asleep", "Silenced", "Blinded", "Weakened"] for effect in api.get_monsters()[monster_idx].effects):
+                    for magic_name in ["Sleep", "Silence", "Blind", "Weaken"]:
+                        if try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
+                            break
+                # 救人
+                if api.get_player_health() < 2000:
+                    if not try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID):
+                        for item_name in ["Health Gem", "Health Potion"]:
+                            try_to_use(api, "item", item_name)
+                            break
+                # 回蓝
+                if api.get_player_mana() < 400:
+                    for item_name in ["Mana Gem", "Mana Potion"]:
+                        if try_to_use(api, "item", item_name):
+                            break
+                    else:
+                        api.do_defend()
+                continue
 
-        # 如果只有一个怪，而且血量很低，普通攻击
-        if len(monster_health) == 1 and monster_health[0][1] < predict_damage("Attack/Attack"):
-            monster_idx = monster_health[0][0]
-            attack_with_logger(api, "Attack/Attack", api.do_attack, BattleAPI.MONSTER_START_ID + monster_idx)
-            continue
+            # 如果只有一个怪，而且血量很低，普通攻击
+            if health < predict_damage("Attack/Attack", api.get_monsters()[monster_idx]):
+                attack_with_logger(api, "Attack/Attack", api.do_attack, BattleAPI.MONSTER_START_ID + monster_idx)
+                continue
 
         # 攻击死最多的、伤害最多的、打中最多的
         target_score = []
@@ -121,7 +148,7 @@ def battle():
                 # Python 切片允许上界超过列表长度
                 window = api.get_monsters()[max(monster_idx - 5, 0):monster_idx + 6]
                 # 从历史数据预测伤害，计算指标
-                damage = predict_damage(f"Magic/{attack_magic.name}")
+                damage = predict_damage(f"Magic/{attack_magic.name}", api.get_monsters()[monster_idx])
                 hit_number = len(window)
                 will_die = sum(monster.health < damage for monster in window)
                 damage_sum = sum(min(damage, monster.health) for monster in window)
@@ -148,8 +175,10 @@ def battle():
             print(f"Monster {i}({monster.name}): HP={monster.health}; MP={monster.mana / 120 * 100:.0f}%; SP={monster.spirit / 120 * 100:.0f}%")
 
     # 战斗结束时保存日志
-    damage_data_file.write_text(json.dumps(damage_data), encoding="utf-8")
+    SKILL_DAMAGE_FILE.write_text(json.dumps(skill_damage_data, indent="\t"), encoding="utf-8")
+    MONSTER_DAMAGE_FILE.write_text(json.dumps(monster_damage_data, indent="\t"), encoding="utf-8")
 
 
-while True:
-    battle()
+if __name__ == "__main__":
+    while True:
+        battle(True, True)
