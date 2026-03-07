@@ -98,6 +98,8 @@ def battle_with_skip_riddle(*args, **kwargs):
         except TokenNotFoundError as e:
             if "function check_submit_button() {" in e.page:
                 # 让谜题自动过期。如果还没过期，那就再等这么多秒
+                # 我知道不选也算是错误，但是 Wiki 说不选的惩罚比乱选的惩罚小，所以就拖吧
+                # 请见 Wiki: https://ehwiki.org/wiki/RiddleMaster
                 print("遇到小马谜题了！")
                 time.sleep(20)
                 continue
