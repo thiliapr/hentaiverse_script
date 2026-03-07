@@ -20,7 +20,7 @@ EXPECT_MANA_BEFORE_END = 400  # 战斗将要结束时，你期望有多少蓝量
 
 # 低级设置
 EMA_MULTIPLIER = 0.99  # 1 - EMA 衰减因子
-EPSILON = 0.3  # 探索率，越高越冒险，越低越死板守旧
+EPSILON = 0.9  # 探索率，越高越冒险，越低越死板守旧
 
 # 脚本预设，没事别动
 SKILL_DAMAGE_FILE = pathlib.Path("skill_damage_data.json")
@@ -55,12 +55,16 @@ def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list
                 monster_ids.append(monster_id)
                 monster_indices.append(monster_index)
 
-    # 更新技能数据（没打中一个怪兽就别记了）
     skill_data = skill_damage_data[skill_id]
     if damage_list:
+        # 更新技能数据（没打中一个怪兽就别记了）
         value = sum(damage_list) / len(damage_list)
         skill_data["damage_sum"] = skill_data["damage_sum"] * EMA_MULTIPLIER + value
         skill_data["weight_sum"] = skill_data["weight_sum"] * EMA_MULTIPLIER + 1
+
+        # 更新技能伤害范围
+        target_monster_idx = args[-1] - BattleAPI.MONSTER_START_ID
+        skill_data["attack_range"] = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data["attack_range"])
 
     # 更新怪兽数据，用技能基础伤害的倍数表示
     skill_base_damage = skill_data["damage_sum"] / skill_data["weight_sum"]
@@ -69,10 +73,6 @@ def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list
         value = damage / skill_base_damage
         monster_data["damage_sum"] = monster_data["damage_sum"] * EMA_MULTIPLIER + value
         monster_data["weight_sum"] = monster_data["weight_sum"] * EMA_MULTIPLIER + 1
-
-    # 更新技能伤害范围
-    target_monster_idx = args[-1] - BattleAPI.MONSTER_START_ID
-    skill_data["attack_range"] = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data["attack_range"])
 
     return textlog
 
