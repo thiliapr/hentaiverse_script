@@ -49,7 +49,8 @@ def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list
     for log in textlog:
         if (res := re.search(r"[\w ]+ [a-z]+s ([\w\W]+) for (\d+) (\w+ )?damage", log)) is not None:
             monster_name, damage, _ = res.groups()
-            if (monster_id, monster_index := next(((monster.monster_id, idx) for idx, monster in enumerate(api.get_monsters()) if monster.name == monster_name), None)) is not None:
+            if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(api.get_monsters()) if monster.name == monster_name), None)) is not None:
+                monster_id, monster_index = monster_info
                 damage_list.append(int(damage))
                 monster_ids.append(monster_id)
                 monster_indices.append(monster_index)
@@ -71,7 +72,7 @@ def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list
 
     # 更新技能伤害范围
     target_monster_idx = args[-1] - BattleAPI.MONSTER_START_ID
-    skill_data["attack_range"] = max(max(monster_ids) - target_monster_idx, target_monster_idx - min(monster_ids), skill_data["attack_range"])
+    skill_data["attack_range"] = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data["attack_range"])
 
     return textlog
 
@@ -92,6 +93,7 @@ def predict_damage(skill_id: str, monster: Monster) -> float:
 
 def predict_attack_range(skill_id: str) -> int:
     return skill_damage_data[skill_id]["attack_range"]
+
 
 def control_monster(api: BattleAPI, monster_idx: int, with_sleep: bool):
     if not any(effect.name in (["Asleep"] if with_sleep else []) + ["Silenced", "Blinded", "Weakened"] for effect in api.get_monsters()[monster_idx].effects):
