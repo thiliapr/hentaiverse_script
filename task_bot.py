@@ -39,7 +39,6 @@ def repair_equipment() -> Callable[[], None] | None:
         return lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Forge&ss=re", data={"repair_all": "1"}, **request_kwargs)
 
 
-
 def encounter() -> Callable[[], None] | None:
     # Random Encounter is a single-round battle that places players against common foes in order to get a lot credits and EXP.
     # 请见 Wiki: https://ehwiki.org/wiki/Random_Encounter
@@ -107,27 +106,28 @@ def battle_with_skip_riddle(*args, **kwargs):
 
 def main():
     while True:
-        print("检测装备损坏 ...")
-        if callback := repair_equipment():
-            print("正在修复装备 ...")
-            callback()
-
         print("检测战斗事件 ...")
         # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
-        if callback := arena():
+        if battle_func := arena():
             event, difficult_level = "Arena 战斗", "1"
         # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
-        elif callback := encounter():
+        elif battle_func := encounter():
             event, difficult_level = "随机遇敌事件", "3"
         else:
-            callback = None
+            battle_func = None
 
-        if callback:
+        if battle_func:
+            # 战斗前准备事项
+            print("检测装备损坏 ...")
+            if repair_func := repair_equipment():
+                print("正在修复装备 ...")
+                repair_func()
+
             # 打印当前战斗事件，并设置难度
             print(f"正在进行 {event} ...")
             settings(difficult_level)
             print(f"开始战斗 ...")
-            callback()
+            battle_func()
 
             try:
                 while True:
