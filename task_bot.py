@@ -31,6 +31,15 @@ def settings(difficult_level: str):
     request_with_retry(requests.post, "https://hentaiverse.org/?s=Character&ss=se", data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"}, **request_kwargs)
 
 
+def repair_equipment() -> Callable[[], None] | None:
+    resp = request_with_retry(requests.get, "https://hentaiverse.org/?s=Forge&ss=re", **request_kwargs)
+    soup = BeautifulSoup(resp.text, "lxml")
+    # 如果存在至少一个装备损坏，就修复装备
+    if soup.find(class_="equiplist").find(class_="eqp"):
+        return lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Forge&ss=re", data={"repair_all": "1"}, **request_kwargs)
+
+
+
 def encounter() -> Callable[[], None] | None:
     # Random Encounter is a single-round battle that places players against common foes in order to get a lot credits and EXP.
     # 请见 Wiki: https://ehwiki.org/wiki/Random_Encounter
@@ -98,21 +107,26 @@ def battle_with_skip_riddle(*args, **kwargs):
 
 def main():
     while True:
+        print("检测装备损坏 ...")
+        if callback := repair_equipment():
+            print("正在修复装备 ...")
+            callback()
+
         print("检测战斗事件 ...")
         # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
         if callback := arena():
             event, difficult_level = "Arena 战斗", "1"
         # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
         elif callback := encounter():
-            event, difficult_level = "随机遇敌事件", "4"
+            event, difficult_level = "随机遇敌事件", "3"
         else:
             callback = None
 
         if callback:
             # 打印当前战斗事件，并设置难度
-            print(f"正在设置难度到 {difficult_level} ...")
-            settings(difficult_level)
             print(f"正在进行 {event} ...")
+            settings(difficult_level)
+            print(f"开始战斗 ...")
             callback()
 
             try:
