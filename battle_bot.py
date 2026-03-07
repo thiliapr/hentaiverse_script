@@ -19,7 +19,7 @@ EXPECT_MANA_BEFORE_END = 400  # 战斗将要结束时，你期望有多少蓝量
 
 # 低级设置
 EMA_MULTIPLIER = 0.99  # 1 - EMA 衰减因子
-EPSILON = 0.9  # 探索率，越高越冒险，越低越死板守旧
+EPSILON = 0.3  # 探索率，越高越冒险，越低越死板守旧
 
 # 脚本预设，没事别动
 SKILL_DATA_FILE = pathlib.Path("skill_data.json")
