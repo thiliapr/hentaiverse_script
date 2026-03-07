@@ -99,13 +99,20 @@ class BattleAPI:
         # 解析怪兽受到的伤害，并相应地更新怪兽的生命值。你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.get_monsters())}
         for log in textlog:
+            monster_name = None
             # Persistent 格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
             if (res := re.search(r"[\w ]+ [a-z]+s ([\w\W]+) for (\d+) (\w+ )?damage", log)) is not None:
                 monster_name, damage, _ = res.groups()
-                # 更新怪兽的生命值
-                if monster_name in monster_name_to_idx:
-                    monster = self.__monsters[monster_name_to_idx[monster_name]]
-                    monster.health = max(monster.health - int(damage), 0)
+                damage = int(damage)
+            # 有时候网络不太行，ReadTimeout 丢失了伤害信息，但是我们可以从怪兽死亡信息直接置零生命
+            elif (res := re.search(r"([\w\W]+) has been defeated.", log)) is not None:
+                monster_name, = res.groups()
+                damage = float("inf")
+
+            # 更新怪兽生命值
+            if monster_name in monster_name_to_idx:
+                monster = self.__monsters[monster_name_to_idx[monster_name]]
+                monster.health = int(max(monster.health - damage, 0))
 
         # 返回原始战斗记录
         return textlog
