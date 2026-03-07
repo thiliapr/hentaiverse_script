@@ -8,10 +8,24 @@ from typing import Literal, Callable
 from collections import defaultdict
 from utils.battle import BattleAPI, Monster
 
-EMA_MULTIPLIER = 0.99
+# 根据你自己的经验去设置
+ATTACK_RANGE = 5  # 一个魔法可以攻击到上下各多少个怪兽，取决于你的实际情况。比如 1 就代表能够攻击到目标上面 1 个怪兽和下面 1 个怪兽，加上目标本身，一共能够攻击到 3 个怪兽；2 就代表能攻击到 5 个怪兽，3 就 7 个，依此类推
+BOSS_HELATH_THRESHOLD = 5000  # BOSS 是有多少血量以上的怪兽
+DEFAULT_MAGIC_DAMAGE = 2000  # 不知道一个魔法多少伤害时，瞎蒙的缺省值
+DEFAULT_PHYSICS_DAMAGE = 1000  # 不知道普通攻击多少伤害时，瞎蒙的缺省值
+ICU_HEALTH_THRESHOLD = 1000  # 什么时候是快死了的状态，低于这个血量会想尽一切办法回血
+DOCTOR_HEALTH_THRESHOLD = 1900  # 什么时候回复生命，低于这个血量会尝试回血
+MANA_RESTORE_THRESHOLD = 400  # 什么时候回复蓝量，低于这个蓝量会尝试用药水回蓝
+EXPECT_HEALTH_BEFORE_END = 2000  # 战斗将要结束时，你期望有多少血量
+EXPECT_MANA_BEFORE_END = 2000  # 战斗将要结束时，你期望有多少蓝量
+
+# 低级设置
+EMA_MULTIPLIER = 0.99  # 1 - EMA 衰减因子
+EPSILON = 0.3  # 探索率，越高越冒险，越低越死板守旧
+
+# 脚本预设，没事别动
 SKILL_DAMAGE_FILE = pathlib.Path("skill_damage_data.json")
 MONSTER_DAMAGE_FILE = pathlib.Path("monster_damage_data.json")
-
 config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
 skill_damage_data = defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}) | json.loads(SKILL_DAMAGE_FILE.read_text("utf-8"))
 monster_damage_data = defaultdict(lambda: defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}))
@@ -60,7 +74,7 @@ def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list
 def predict_damage(skill_id: str, monster: Monster) -> float:
     # 获取技能伤害
     if skill_id not in skill_damage_data:
-        return 2000 if skill_id.startswith("Magic/") else 800
+        return DEFAULT_MAGIC_DAMAGE if skill_id.startswith("Magic/") else DEFAULT_PHYSICS_DAMAGE
     skill_base_damage = skill_damage_data[skill_id]["damage_sum"] / skill_damage_data[skill_id]["weight_sum"]
 
     # 获取技能对怪兽的伤害
@@ -99,17 +113,17 @@ def battle():
                     try_to_use(api, "item", item_name)
 
         # 保命
-        if api.get_player_health() < 1000:
+        if api.get_player_health() < ICU_HEALTH_THRESHOLD:
             for item_name in ["Health Gem", "Health Potion"]:
                 if try_to_use(api, "item", item_name):
                     break
             else:
                 try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID)
-        elif api.get_player_health() < 1900:
+        elif api.get_player_health() < DOCTOR_HEALTH_THRESHOLD:
             try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID)
 
         # 回蓝
-        if api.get_player_mana() < 400:
+        if api.get_player_mana() < MANA_RESTORE_THRESHOLD:
             for item_name in ["Mana Gem", "Mana Potion"]:
                 if try_to_use(api, "item", item_name):
                     break
@@ -123,17 +137,17 @@ def battle():
         monster_health = [(idx, monster.health) for idx, monster in enumerate(api.get_monsters()) if monster.health > 0]
         if len(monster_health) == 1:
             monster_idx, health = monster_health[0]
-            if heal_before_end_flag and (api.get_player_health() < 2000 or api.get_player_mana() < 400):
+            if heal_before_end_flag and (api.get_player_health() < EXPECT_HEALTH_BEFORE_END or api.get_player_mana() < EXPECT_MANA_BEFORE_END):
                 # 给敌人打麻药
                 control_monster(api, monster_idx, True)
                 # 救人
-                if api.get_player_health() < 2000:
+                if api.get_player_health() < EXPECT_HEALTH_BEFORE_END:
                     if not try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID):
                         for item_name in ["Health Gem", "Health Potion"]:
                             try_to_use(api, "item", item_name)
                             break
                 # 回蓝
-                if api.get_player_mana() < 400:
+                if api.get_player_mana() < EXPECT_MANA_BEFORE_END:
                     for item_name in ["Mana Gem", "Mana Potion"]:
                         if try_to_use(api, "item", item_name):
                             break
@@ -147,7 +161,7 @@ def battle():
                 continue
 
         # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
-        bosses = [monster_idx for monster_idx, monster in enumerate(api.get_monsters()) if monster.health > 5000]
+        bosses = [monster_idx for monster_idx, monster in enumerate(api.get_monsters()) if monster.health > BOSS_HELATH_THRESHOLD]
         if len(bosses) == sum(monster.health > 0 for monster in api.get_monsters()):
             for monster_idx in bosses:
                 # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
@@ -163,7 +177,7 @@ def battle():
                 if api.get_monsters()[monster_idx].health == 0:
                     continue
                 # Python 切片允许上界超过列表长度
-                window = api.get_monsters()[max(monster_idx - 5, 0):monster_idx + 6]
+                window = api.get_monsters()[max(monster_idx - ATTACK_RANGE, 0):monster_idx + ATTACK_RANGE + 1]
                 # 从历史数据预测伤害，计算指标
                 damage = predict_damage(f"Magic/{attack_magic.name}", api.get_monsters()[monster_idx])
                 hit_number = len(window)
@@ -175,7 +189,7 @@ def battle():
 
         # 选择魔法和目标
         (best_magic, best_target), _ = max(target_score, key=lambda x: x[1])
-        if random.random() < 0.3:
+        if random.random() < EPSILON:
             (best_magic, _), _ = random.choice(target_score)
         print(f"计划用 {best_magic.name} 打第 {best_target + 1} 个怪兽。")
 
