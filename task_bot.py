@@ -114,7 +114,7 @@ def main():
             event, difficult_level = "Arena 战斗", "1"
         # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
         elif battle_func := encounter():
-            event, difficult_level = "随机遇敌事件", "3"
+            event, difficult_level = "随机遇敌事件", "2"
         else:
             battle_func = None
 
