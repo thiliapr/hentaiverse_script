@@ -31,4 +31,4 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
 3. 运行`python task_bot.py`，大功告成
 
 ## 怎么写自己的脚本
-请参考`battle_bot.py`的内容和`utils/battle.py`的`Battle`类的方法
+请参考`battle_bot.py`的内容和`utils/battle.py`的`BattleAPI`类的方法
