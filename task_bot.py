@@ -82,8 +82,8 @@ def battle_with_skip_riddle(*args, **kwargs):
 
 def main():
     while True:
-        if arena() or encounter():
-            print("启动战斗 ...")
+        if (arena_flag := arena()) or encounter():
+            print("正在进行" + ("Arena 战斗" if arena_flag else "随机遇敌事件") + " ...")
             try:
                 while True:
                     battle_with_skip_riddle()
@@ -92,7 +92,7 @@ def main():
                 pass
         else:
             print("等待 10 分钟 ...")
-        time.sleep(600)
+            time.sleep(600)
 
 
 if __name__ == "__main__":
