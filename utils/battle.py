@@ -151,17 +151,23 @@ class BattleAPI:
         return self.__monsters
 
     def get_player_health(self) -> int:
-        if (health_bar := self.__soups["pane_vitals"].find(id="vrhb")):
-            return int(health_bar.text)
-        # 血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
+        # 游戏提供两种 UI: Standard 和 Utilitarian。它们的标签有不同的 ID 前缀
+        for prefix in ["", "d"]:
+            if (label := self.__soups["pane_vitals"].find(id=f"{prefix}vrhb")):
+                return int(label.text)
+        # 在 Standard UI 下，血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
         return 1
 
     def get_player_mana(self) -> int:
-        # 蓝量和 Spirit 都是显示在条外的，所以即使为零也会显示，不需要特殊处理
-        return int(self.__soups["pane_vitals"].find(id="vrm").text)
+        # 无论是在任何模式，蓝量和 Spirit 都是显示在条外的，所以即使为零也会显示，不需要特殊处理
+        for prefix in ["", "d"]:
+            if (label := self.__soups["pane_vitals"].find(id=f"{prefix}vrm")):
+                return int(label.text)
 
     def get_player_spirit(self) -> int:
-        return int(self.__soups["pane_vitals"].find(id="vrs").text)
+        for prefix in ["", "d"]:
+            if (label := self.__soups["pane_vitals"].find(id=f"{prefix}vrs")):
+                return int(label.text)
 
     def get_player_effects(self) -> list[Effect]:
         return [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__soups["pane_effects"].find_all("img")]
