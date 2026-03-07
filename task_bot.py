@@ -88,9 +88,9 @@ def battle_with_skip_riddle(*args, **kwargs):
         try:
             return battle(*args, **kwargs)
         except TokenNotFoundError as e:
-            print("遇到小马谜题了！")
             if "function check_submit_button() {" in e.page:
                 # 让谜题自动过期。如果还没过期，那就再等这么多秒
+                print("遇到小马谜题了！")
                 time.sleep(20)
                 continue
             raise e
