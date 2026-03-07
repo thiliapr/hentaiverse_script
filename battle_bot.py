@@ -9,7 +9,6 @@ from collections import defaultdict
 from utils.battle import BattleAPI, Monster
 
 # 根据你自己的经验去设置
-ATTACK_RANGE = 5  # 一个魔法可以攻击到上下各多少个怪兽，取决于你的实际情况。比如 1 就代表能够攻击到目标上面 1 个怪兽和下面 1 个怪兽，加上目标本身，一共能够攻击到 3 个怪兽；2 就代表能攻击到 5 个怪兽，3 就 7 个，依此类推
 BOSS_HELATH_THRESHOLD = 5000  # BOSS 是有多少血量以上的怪兽
 DEFAULT_MAGIC_DAMAGE = 2000  # 不知道一个魔法多少伤害时，瞎蒙的缺省值
 DEFAULT_PHYSICS_DAMAGE = 1000  # 不知道普通攻击多少伤害时，瞎蒙的缺省值
@@ -27,7 +26,7 @@ EPSILON = 0.3  # 探索率，越高越冒险，越低越死板守旧
 SKILL_DAMAGE_FILE = pathlib.Path("skill_damage_data.json")
 MONSTER_DAMAGE_FILE = pathlib.Path("monster_damage_data.json")
 config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
-skill_damage_data = defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}) | json.loads(SKILL_DAMAGE_FILE.read_text("utf-8"))
+skill_damage_data = defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0, "attack_range": 0}) | json.loads(SKILL_DAMAGE_FILE.read_text("utf-8"))
 monster_damage_data = defaultdict(lambda: defaultdict(lambda: {"damage_sum": 0, "weight_sum": 0}))
 # 手动更新 monster 信息，否则会覆盖第二级 defaultdict
 for skill_id, skill_data in json.loads(MONSTER_DAMAGE_FILE.read_text("utf-8")).items():
@@ -46,12 +45,14 @@ def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list
     # 分析伤害
     damage_list = []
     monster_ids = []
+    monster_indices = []
     for log in textlog:
         if (res := re.search(r"[\w ]+ [a-z]+s ([\w\W]+) for (\d+) (\w+ )?damage", log)) is not None:
             monster_name, damage, _ = res.groups()
-            if (monster_id := next((monster.monster_id for monster in api.get_monsters() if monster.name == monster_name), None)) is not None:
+            if (monster_id, monster_index := next(((monster.monster_id, idx) for idx, monster in enumerate(api.get_monsters()) if monster.name == monster_name), None)) is not None:
                 damage_list.append(int(damage))
                 monster_ids.append(monster_id)
+                monster_indices.append(monster_index)
 
     # 更新技能数据（没打中一个怪兽就别记了）
     skill_data = skill_damage_data[skill_id]
@@ -67,6 +68,10 @@ def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list
         value = damage / skill_base_damage
         monster_data["damage_sum"] = monster_data["damage_sum"] * EMA_MULTIPLIER + value
         monster_data["weight_sum"] = monster_data["weight_sum"] * EMA_MULTIPLIER + 1
+
+    # 更新技能伤害范围
+    target_monster_idx = args[-1] - BattleAPI.MONSTER_START_ID
+    skill_data["attack_range"] = max(max(monster_ids) - target_monster_idx, target_monster_idx - min(monster_ids), skill_data["attack_range"])
 
     return textlog
 
@@ -84,6 +89,9 @@ def predict_damage(skill_id: str, monster: Monster) -> float:
     multiplier = monster_data["damage_sum"] / monster_data["weight_sum"]
     return skill_base_damage * multiplier
 
+
+def predict_attack_range(skill_id: str) -> int:
+    return skill_damage_data[skill_id]["attack_range"]
 
 def control_monster(api: BattleAPI, monster_idx: int, with_sleep: bool):
     if not any(effect.name in (["Asleep"] if with_sleep else []) + ["Silenced", "Blinded", "Weakened"] for effect in api.get_monsters()[monster_idx].effects):
@@ -177,9 +185,11 @@ def battle():
                 if api.get_monsters()[monster_idx].health == 0:
                     continue
                 # Python 切片允许上界超过列表长度
-                window = api.get_monsters()[max(monster_idx - ATTACK_RANGE, 0):monster_idx + ATTACK_RANGE + 1]
+                skill_id = f"Magic/{attack_magic.name}"
+                attack_range = predict_attack_range(skill_id)
+                window = api.get_monsters()[max(monster_idx - attack_range, 0):monster_idx + attack_range + 1]
                 # 从历史数据预测伤害，计算指标
-                damage = predict_damage(f"Magic/{attack_magic.name}", api.get_monsters()[monster_idx])
+                damage = predict_damage(skill_id, api.get_monsters()[monster_idx])
                 hit_number = len(window)
                 will_die = sum(monster.health < damage for monster in window)
                 damage_sum = sum(min(damage, monster.health) for monster in window)
