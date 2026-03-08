@@ -111,7 +111,15 @@ class BattleTool:
 
 def battle():
     api = BattleAPI(config["ipb_member_id"], config["ipb_pass_hash"], config["user_agent"])
-    log_start_idx = 0
+
+    # 猴子补丁，每次 do_action 实时显示 log。好孩子不要学，在 BattleAPI 加 hook 方法比这个优雅多了
+    old_do_action = api._BattleAPI__do_action
+    def do_action_with_display(*args, **kwargs):
+        textlog = old_do_action(*args, **kwargs)
+        print("\n".join(textlog))
+        print("=" * 32)
+        return textlog
+    api._BattleAPI__do_action = do_action_with_display
 
     # 检测是否需要结束前回血、是否需要叠 Buff
     # 如果分析当前回合数和总回合数没有结果，说明战斗只持续一个回合
@@ -217,13 +225,6 @@ def battle():
             if log == "Stop beating dead ponies.":
                 print("一些不好的事情发生了！服务器说你在鞭尸！")
                 api.get_monsters()[best_target].health = 0
-
-        # 打印日志
-        for logs in api.logs[log_start_idx:]:
-            for log in logs:
-                print(log)
-            print("=" * 32)
-        log_start_idx = len(api.logs)
 
     # 战斗结束时保存战斗数据
     SKILL_DATA_FILE.write_text(json.dumps(all_skill_data, indent="\t"), encoding="utf-8")
