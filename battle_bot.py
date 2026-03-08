@@ -49,7 +49,7 @@ class BattleTool:
         print("=" * 32)
 
     @staticmethod
-    def attack_with_logger(api: BattleAPI, skill_id: str, method: Callable[..., list[str]], *args, **kwargs) -> list[str]:
+    def attack_with_record(api: BattleAPI, skill_id: str, method: Callable[..., list[str]], *args, **kwargs) -> list[str]:
         # 执行攻击
         textlog = method(*args, **kwargs)
 
@@ -181,7 +181,7 @@ def battle():
 
             # 如果只有一个怪，而且血量很低，普通攻击
             if health < BattleTool.predict_damage("Attack/Attack", api.get_monsters()[monster_idx]):
-                BattleTool.attack_with_logger(api, "Attack/Attack", api.do_attack, BattleAPI.MONSTER_START_ID + monster_idx)
+                BattleTool.attack_with_record(api, "Attack/Attack", api.do_attack, BattleAPI.MONSTER_START_ID + monster_idx)
                 continue
 
         # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
@@ -219,7 +219,7 @@ def battle():
             (best_magic, _), _ = random.choice(target_score)
 
         # 执行攻击
-        for log in BattleTool.attack_with_logger(api, f"Magic/{best_magic.name}", api.use_magic, best_magic, BattleAPI.MONSTER_START_ID + best_target):
+        for log in BattleTool.attack_with_record(api, f"Magic/{best_magic.name}", api.use_magic, best_magic, BattleAPI.MONSTER_START_ID + best_target):
             if log == "Stop beating dead ponies.":
                 print("一些不好的事情发生了！服务器说你在鞭尸！")
                 api.get_monsters()[best_target].health = 0
