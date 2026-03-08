@@ -3,7 +3,7 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, random, re
+import json, pathlib, random, re, copy
 from typing import Literal, Callable
 from utils.battle import BattleAPI, Monster
 
@@ -19,7 +19,7 @@ EXPECT_MANA_BEFORE_END = 400  # 战斗将要结束时，你期望有多少蓝量
 
 # 低级设置
 EMA_MULTIPLIER = 0.99  # 1 - EMA 衰减因子
-EPSILON = 0.3  # 探索率，越高越冒险，越低越死板守旧
+EPSILON = 0.9  # 探索率，越高越冒险，越低越死板守旧
 
 # 脚本预设，没事别动
 SKILL_DATA_FILE = pathlib.Path("skill_data.json")
@@ -63,7 +63,7 @@ class BattleTool:
         monster_indices, _, damage_list = zip(*damage_info)
 
         # 更新技能数据（伤害和范围）
-        skill_data = all_skill_data.setdefault(skill_id, SKILL_TEMPLATE.copy())
+        skill_data = all_skill_data.setdefault(skill_id, copy.deepcopy(SKILL_TEMPLATE))
         EMA.update(skill_data["damage"], sum(damage_list) / len(damage_list))
         target_monster_idx = args[-1] - BattleAPI.MONSTER_START_ID
         skill_data["attack_range"] = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data["attack_range"])
@@ -71,7 +71,7 @@ class BattleTool:
         # 更新怪兽数据，用技能基础伤害的倍数表示
         skill_base_damage = EMA.predict(skill_data["damage"])
         for _, monster_id, damage in damage_info:
-            EMA.update(all_monster_data.setdefault(skill_id, {}).setdefault(str(monster_id), MONSTER_TEMPLATE.copy())["relative_damage"], damage / skill_base_damage)
+            EMA.update(all_monster_data.setdefault(skill_id, {}).setdefault(str(monster_id), copy.deepcopy(MONSTER_TEMPLATE))["relative_damage"], damage / skill_base_damage)
 
         return textlog
 
