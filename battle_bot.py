@@ -63,7 +63,7 @@ class BattleTool:
         monster_indices, _, damage_list = zip(*damage_info)
 
         # 更新技能数据（伤害和范围）
-        skill_data = all_skill_data.setdefault(skill_id, SKILL_TEMPLATE)
+        skill_data = all_skill_data.setdefault(skill_id, SKILL_TEMPLATE.copy())
         EMA.update(skill_data["damage"], sum(damage_list) / len(damage_list))
         target_monster_idx = args[-1] - BattleAPI.MONSTER_START_ID
         skill_data["attack_range"] = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data["attack_range"])
@@ -71,7 +71,7 @@ class BattleTool:
         # 更新怪兽数据，用技能基础伤害的倍数表示
         skill_base_damage = EMA.predict(skill_data["damage"])
         for _, monster_id, damage in damage_info:
-            EMA.update(all_monster_data.setdefault(skill_id, {}).setdefault(str(monster_id), MONSTER_TEMPLATE)["relative_damage"], damage / skill_base_damage)
+            EMA.update(all_monster_data.setdefault(skill_id, {}).setdefault(str(monster_id), MONSTER_TEMPLATE.copy())["relative_damage"], damage / skill_base_damage)
 
         return textlog
 
