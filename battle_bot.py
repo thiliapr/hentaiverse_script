@@ -9,8 +9,8 @@ from utils.battle import BattleAPI, Monster
 
 # 根据你自己的经验去设置
 BOSS_HELATH_THRESHOLD = 5000  # BOSS 是有多少血量以上的怪兽
-DEFAULT_MAGIC_DAMAGE = 2000  # 不知道一个魔法多少伤害时，瞎蒙的缺省值
-DEFAULT_PHYSICS_DAMAGE = 1000  # 不知道普通攻击多少伤害时，瞎蒙的缺省值
+DEFAULT_MAGIC_DAMAGE = 10000  # 不知道一个魔法多少伤害时，瞎蒙的缺省值
+DEFAULT_PHYSICS_DAMAGE = 10000  # 不知道普通攻击多少伤害时，瞎蒙的缺省值
 ICU_HEALTH_THRESHOLD = 1000  # 什么时候是快死了的状态，低于这个血量会想尽一切办法回血
 DOCTOR_HEALTH_THRESHOLD = 1900  # 什么时候回复生命，低于这个血量会尝试回血
 MANA_RESTORE_THRESHOLD = 400  # 什么时候回复蓝量，低于这个蓝量会尝试用药水回蓝
@@ -116,6 +116,10 @@ class BattleTool:
 def battle():
     api = BattleAPI(config["ipb_member_id"], config["ipb_pass_hash"], config["user_agent"])
 
+    # 打印初始日志
+    print("\n".join(api.logs[0]))
+    print("+-" * 16)
+
     # 使每次 do_action 都实时显示 log，而不是循环最后才显示
     api.add_post_action_hook(BattleTool.display_log_after_action)
 
@@ -128,6 +132,8 @@ def battle():
             heal_before_end_flag = True
         if total_rounds > 5:
             keep_buff = True
+    if sum(monster.health for monster in api.get_monsters()) > 30000:
+        keep_buff = True
 
     while any(monster.health > 0 for monster in api.get_monsters()):
         # 保持 Buff
