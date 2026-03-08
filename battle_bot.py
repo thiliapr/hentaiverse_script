@@ -56,11 +56,10 @@ class BattleTool:
         # 分析伤害
         damage_info = []
         for log in textlog:
-            if (res := re.search(r"[\w ]+ [a-z]+s ([\w\W]+) for (\d+) (\w+ )?damage", log)) is not None:
-                monster_name, damage, _ = res.groups()
-                if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(api.get_monsters()) if monster.name == monster_name), None)) is not None:
+            if (res := BattleAPI.parse_damage(log)) is not None:
+                if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(api.get_monsters()) if monster.name == res.monster_name), None)) is not None:
                     monster_id, monster_index = monster_info
-                    damage_info.append((monster_index, monster_id, int(damage)))
+                    damage_info.append((monster_index, monster_id, int(res.damage)))
 
         # 没有造成任何伤害时跳过数据库更新
         if not damage_info:

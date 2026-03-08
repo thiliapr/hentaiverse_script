@@ -45,6 +45,14 @@ class Monster(BaseModel):
     effects: list[Effect] = Field([], description="怪兽身上的各种 Buff")
 
 
+class DamageLog(BaseModel):
+    skill_name: str = Field(description="什么技能造成了伤害")
+    action: str = Field(description="造成了怎样的伤害，比如 hit、crit、blast")
+    monster_name: str = Field(description="被伤害了的怪兽的名字")
+    damage: int = Field(ge=1, description="造成了多少生命值的伤害")
+    attribute: str | None = Field(description="造成的是什么属性的伤害")
+
+
 class TokenNotFoundError(Exception):
     def __init__(self, page: str):
         self.page = page
@@ -106,9 +114,9 @@ class BattleAPI:
         for log in textlog:
             monster_name = None
             # Persistent 格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
-            if (res := re.search(r"[\w ]+ [a-z]+s ([\w\W]+) for (\d+) (\w+ )?damage", log)) is not None:
-                monster_name, damage, _ = res.groups()
-                damage = int(damage)
+            if (res := BattleAPI.parse_damage(log)) is not None:
+                monster_name = res.monster_name
+                damage = res.damage
             # 有时候网络不太行，ReadTimeout 丢失了伤害信息，但是我们可以从怪兽死亡信息直接置零生命
             elif (res := re.search(r"([\w\W]+) has been defeated.", log)) is not None:
                 monster_name, = res.groups()
@@ -136,6 +144,12 @@ class BattleAPI:
     def parse_effect(effect_str: str) -> Effect:
         name, description, remaining_turns = re.search(r"battle\.set_infopane_effect\('([^']+)',\s*'([^']+)',\s*(\d+)\)", effect_str).groups()
         return Effect(name=name, description=description, remaining_turns=remaining_turns)
+
+    @staticmethod
+    def parse_damage(log: str) -> DamageLog | None:
+        if (res := re.search(r"([\w ]+) ([a-z]+)s ([\w\W]+) for (\d+) (\w+)? ?damage", log)) is not None:
+            skill_name, action, monster_name, damage, attribute = res.groups()
+            return DamageLog(skill_name=skill_name, action=action, monster_name=monster_name, damage=damage, attribute=attribute)
 
     def use_magic(self, magic: Magic, target: int) -> list[str]:
         return self.__do_action({"mode": "magic", "target": target, "skill": magic.skill_id})
