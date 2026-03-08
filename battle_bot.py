@@ -117,8 +117,9 @@ def battle():
     api = BattleAPI(config["ipb_member_id"], config["ipb_pass_hash"], config["user_agent"])
 
     # 打印初始日志
+    print("+ - " * 10)
     print("\n".join(api.logs[0]))
-    print("+-" * 16)
+    print("=" * 32)
 
     # 使每次 do_action 都实时显示 log，而不是循环最后才显示
     api.add_post_action_hook(BattleTool.display_log_after_action)
