@@ -4,6 +4,8 @@
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
 import re
+from typing import Any
+from collections.abc import Callable
 import requests
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
@@ -58,7 +60,7 @@ class BattleAPI:
         if user_agent:
             self.__request_kwargs["headers"] = {"User-Agent": user_agent}
 
-        # 获取战斗界面
+        # 获取战斗界面和
         page = request_with_retry(requests.get, MAIN_URL, **self.__request_kwargs).text
 
         # 获取 battle_token
@@ -81,6 +83,9 @@ class BattleAPI:
             key=lambda x: x[0]  # 按照怪物出场的顺序排序，A 最先出场，B 第二个出场，以此类推
         )
         self.__monsters = [Monster(name=name, monster_id=monster_id, level=level, health=health) for _, monster_id, name, level, health in monsters_info]
+
+        # 初始化钩子列表
+        self.__post_action_hooks = []
 
     def __do_action(self, action: dict[str, int | str]) -> list[str]:
         # 补充信息、执行动作
@@ -113,6 +118,10 @@ class BattleAPI:
             if monster_name in monster_name_to_idx:
                 monster = self.__monsters[monster_name_to_idx[monster_name]]
                 monster.health = int(max(monster.health - damage, 0))
+
+        # 执行钩子
+        for callback in self.__post_action_hooks:
+            callback(self, textlog)
 
         # 返回原始战斗记录
         return textlog
@@ -200,3 +209,6 @@ class BattleAPI:
                 skill_id, = re.search(r"battle\.set_friendly_skill\('([^']+)'\)", item_element.attrs["onclick"]).groups()
             items.append(Item(name=name, available=available, skill_id=skill_id))
         return items
+
+    def add_post_action_hook(self, callback: Callable[["BattleAPI", list[str]], Any]):
+        self.__post_action_hooks.append(callback)
