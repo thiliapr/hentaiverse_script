@@ -39,16 +39,17 @@ def repair_equipment() -> Callable[[], None] | None:
         return lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Forge&ss=re", data={"repair_all": "1"}, **request_kwargs)
 
 
-def encounter() -> Callable[[], None] | None:
+def encounter(session_cookies: dict[str, str]) -> Callable[[], None] | None:
     # Random Encounter is a single-round battle that places players against common foes in order to get a lot credits and EXP.
     # 请见 Wiki: https://ehwiki.org/wiki/Random_Encounter
     cookies = request_kwargs["cookies"]
     headers = request_kwargs["headers"]
 
-    # 发送网页请求。这里的 event 代表时间刻（UNIX 时间），服务器会检测 event 并相应地返回是否存在随机遇敌事件，然后返回一个新的 cookie
-    # 不过想靠这个无限刷随机遇敌是不可行的，因为服务器会隔着一定时间才刷新随机遇敌事件，在刷新前即使 event=1 也无济于事
-    # 那么你问我 event 有何意义？那你就得去问服务器开发者了，反正我不知道
-    resp = request_with_retry(requests.get, GALLERY_URL, headers=headers, cookies=cookies | {"event": "1"})
+    # 发送网页请求
+    if not session_cookies:
+        session_cookies.update(dict(request_with_retry(requests.get, GALLERY_URL, **request_kwargs).cookies))
+    resp = request_with_retry(requests.get, GALLERY_URL, headers=headers, cookies=cookies | session_cookies)
+    session_cookies.update(dict(resp.cookies))
 
     # 解析检测随机遇敌事件，并点击遇敌链接
     soup = BeautifulSoup(resp.text, "lxml")
@@ -56,7 +57,8 @@ def encounter() -> Callable[[], None] | None:
         return
     if (link_element := eventpane.find("a", href=True)) is None:
         return
-    return lambda: request_with_retry(requests.get, link_element.attrs["href"], cookies=cookies, headers=headers)
+    battle_func = lambda: request_with_retry(requests.get, link_element.attrs["href"], cookies=cookies, headers=headers)
+    return battle_func
 
 
 def arena() -> Callable[[], None] | None:
@@ -107,14 +109,17 @@ def battle_with_skip_riddle(*args, **kwargs):
 
 
 def main():
+    # 初始化随机遇敌函数内部状态
+    encounter_cookies = {}
+    
     while True:
         print("检测战斗事件 ...")
-        # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
-        if battle_func := arena():
-            event, difficult_level = "Arena 战斗", "1"
         # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
-        elif battle_func := encounter():
+        if battle_func := encounter(encounter_cookies):
             event, difficult_level = "随机遇敌事件", "2"
+        # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
+        elif battle_func := arena():
+            event, difficult_level = "Arena 战斗", "1"
         else:
             battle_func = None
 
