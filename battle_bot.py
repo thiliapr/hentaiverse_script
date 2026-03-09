@@ -49,7 +49,7 @@ class BattleTool:
 
     @staticmethod
     def display_player_info_after_action(api: BattleAPI, _):
-        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={', '.join(f'{effect.name} ({effect.remaining_turns} Turn(s) to Left)' for effect in api.get_player_effects())}")
+        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={', '.join(f'{effect.name}({effect.remaining_turns} Turn(s))' for effect in api.get_player_effects())}")
 
     @staticmethod
     def display_seperate_after_action(_1, _2):
