@@ -3,7 +3,7 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, time, re, requests
+import random, json, pathlib, time, re, requests
 from collections.abc import Callable
 from bs4 import BeautifulSoup
 from utils.network import request_with_retry
@@ -144,7 +144,7 @@ def main():
                 pass
         else:
             print("没有发现战斗事件，等待一会继续 ...")
-            time.sleep(600)
+            time.sleep(random.randint(450, 750))
 
 
 if __name__ == "__main__":
