@@ -42,7 +42,7 @@ class EMA:
         data["sum_weight"] = data["sum_weight"] * EMA_MULTIPLIER + 1
 
 
-class BattleTool:
+class BattleAPIHook:
     @staticmethod
     def display_log_after_action(_, textlog: list[str]):
         print("\n".join(textlog))
@@ -55,6 +55,8 @@ class BattleTool:
     def display_seperate_after_action(_1, _2):
         print("* - " * 10)
 
+
+class BattleTool:
     @staticmethod
     def attack_with_record(api: BattleAPI, skill_id: str, method: Callable[..., list[str]], *args, **kwargs) -> list[str]:
         # 执行攻击
@@ -125,14 +127,14 @@ def battle():
 
     # 打印初始日志
     print("+ - " * 10)
-    BattleTool.display_player_info_after_action(api, None)
+    BattleAPIHook.display_player_info_after_action(api, None)
     print("\n".join(api.logs[0]))
-    BattleTool.display_seperate_after_action(None, None)
+    BattleAPIHook.display_seperate_after_action(None, None)
 
     # 使每次 do_action 都实时显示 log，而不是循环最后才显示
-    api.add_post_action_hook(BattleTool.display_log_after_action)
-    api.add_post_action_hook(BattleTool.display_player_info_after_action)
-    api.add_post_action_hook(BattleTool.display_seperate_after_action)
+    api.add_post_action_hook(BattleAPIHook.display_log_after_action)
+    api.add_post_action_hook(BattleAPIHook.display_player_info_after_action)
+    api.add_post_action_hook(BattleAPIHook.display_seperate_after_action)
 
     # 检测是否需要结束前回血、是否需要叠 Buff
     # 如果分析当前回合数和总回合数没有结果，说明战斗只持续一个回合
