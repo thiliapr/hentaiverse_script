@@ -238,10 +238,7 @@ def battle():
             (best_magic, _), _ = random.choice(target_score)
 
         # 执行攻击
-        for log in BattleTool.attack_with_record(api, f"Magic/{best_magic.name}", api.use_magic, best_magic, BattleAPI.MONSTER_START_ID + best_target):
-            if log == "Stop beating dead ponies.":
-                print("一些不好的事情发生了！服务器说你在鞭尸！")
-                api.get_monsters()[best_target].health = 0
+        BattleTool.attack_with_record(api, f"Magic/{best_magic.name}", api.use_magic, best_magic, BattleAPI.MONSTER_START_ID + best_target)
 
     # 战斗结束时保存战斗数据
     SKILL_DATA_FILE.write_text(json.dumps(all_skill_data, indent="\t"), encoding="utf-8")

@@ -113,6 +113,8 @@ class BattleAPI:
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.get_monsters())}
         for log in textlog:
             monster_name = None
+            monster_idx = None
+
             # Persistent 格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
             if (res := BattleAPI.parse_damage(log)) is not None:
                 monster_name = res.monster_name
@@ -121,10 +123,16 @@ class BattleAPI:
             elif (res := re.search(r"([\w\W]+) has been defeated.", log)) is not None:
                 monster_name, = res.groups()
                 damage = float("inf")
+            # 如果服务器说你在鞭尸，你肯定是干了什么但网络错误了
+            elif log == "Stop beating dead ponies.":
+                monster_idx = action["target"] - BattleAPI.MONSTER_START_ID
+                damage = float("inf")
 
             # 更新怪兽生命值
             if monster_name in monster_name_to_idx:
-                monster = self.__monsters[monster_name_to_idx[monster_name]]
+                monster_idx = monster_name_to_idx[monster_name]
+            if monster_idx is not None:
+                monster = self.__monsters[monster_idx]
                 monster.health = int(max(monster.health - damage, 0))
 
         # 执行钩子
