@@ -46,7 +46,14 @@ class BattleTool:
     @staticmethod
     def display_log_after_action(_, textlog: list[str]):
         print("\n".join(textlog))
-        print("=" * 32)
+
+    @staticmethod
+    def display_player_info_after_action(api: BattleAPI, _):
+        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={', '.join(f'{effect.name} ({effect.remaining_turns} Turn(s) to Left)' for effect in api.get_player_effects())}")
+
+    @staticmethod
+    def display_seperate_after_action(_1, _2):
+        print("* - " * 10)
 
     @staticmethod
     def attack_with_record(api: BattleAPI, skill_id: str, method: Callable[..., list[str]], *args, **kwargs) -> list[str]:
@@ -118,11 +125,14 @@ def battle():
 
     # 打印初始日志
     print("+ - " * 10)
+    BattleTool.display_player_info_after_action(api, None)
     print("\n".join(api.logs[0]))
-    print("=" * 32)
+    BattleTool.display_seperate_after_action(None, None)
 
     # 使每次 do_action 都实时显示 log，而不是循环最后才显示
     api.add_post_action_hook(BattleTool.display_log_after_action)
+    api.add_post_action_hook(BattleTool.display_player_info_after_action)
+    api.add_post_action_hook(BattleTool.display_seperate_after_action)
 
     # 检测是否需要结束前回血、是否需要叠 Buff
     # 如果分析当前回合数和总回合数没有结果，说明战斗只持续一个回合
