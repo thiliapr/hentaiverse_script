@@ -113,26 +113,14 @@ class BattleAPI:
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.get_monsters())}
         for log in textlog:
             monster_name = None
-            monster_idx = None
-
             # Persistent 格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
             if (res := BattleAPI.parse_damage(log)) is not None:
                 monster_name = res.monster_name
                 damage = res.damage
-            # 有时候网络不太行，ReadTimeout 丢失了伤害信息，但是我们可以从怪兽死亡信息直接置零生命
-            elif (res := re.search(r"([\w\W]+) has been defeated.", log)) is not None:
-                monster_name, = res.groups()
-                damage = float("inf")
-            # 如果服务器说你在鞭尸，你肯定是干了什么但网络错误了
-            elif log == "Stop beating dead ponies.":
-                monster_idx = action["target"] - BattleAPI.MONSTER_START_ID
-                damage = float("inf")
 
             # 更新怪兽生命值
             if monster_name in monster_name_to_idx:
-                monster_idx = monster_name_to_idx[monster_name]
-            if monster_idx is not None:
-                monster = self.__monsters[monster_idx]
+                monster = self.__monsters[monster_name_to_idx[monster_name]]
                 monster.health = int(max(monster.health - damage, 0))
 
         # 执行钩子
@@ -174,14 +162,17 @@ class BattleAPI:
     def get_monsters(self) -> list[Monster]:
         # 每次获取的时候，先更新一下状态
         for monster, monster_element in zip(self.__monsters, self.__soups["pane_monster"].find_all(class_="btm1")):
-            # 注意: 在血量、蓝量、Spirit 量条显示的都是比例缩放的值
-            # 比如满了就是 120px，一半就是 60px，非常不靠谱。既然 pane_vitals 已经包含血量了，我们就不从 pane 获取了
+            # 注意: 血量、蓝量、Spirit 量条显示的都是比例缩放的值，比如满了就是 120px，一半就是 60px，非常不靠谱
             for attr, alt in [("mana", "magic"), ("spirit", "spirit")]:
                 result = monster_element.find(alt=alt)
                 if result is None:
                     continue
                 value = int(re.search(r"width:(\d+)px", result.attrs["style"]).group(1))
                 setattr(monster, attr, value)
+
+            # 如果怪兽不可点击，那么肯定是死了，有时候网络错误不能通过日志捕捉这一点，我们就从怪兽面板判断吧
+            if "onclick" not in monster_element.attrs:
+                monster.health = 0
 
             # 怪兽也有 Buff
             monster.effects = [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
