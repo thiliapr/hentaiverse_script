@@ -68,12 +68,11 @@ class BattleAPI:
         if user_agent:
             self.__request_kwargs["headers"] = {"User-Agent": user_agent}
 
-        # 获取战斗界面和
+        # 获取战斗界面
         page = request_with_retry(requests.get, MAIN_URL, **self.__request_kwargs).text
 
         # 获取 battle_token
-        result = re.search('var battle_token = "([^"]+)"', page)
-        if result is None:
+        if (result := re.search('var battle_token = "([^"]+)"', page)) is None:
             raise TokenNotFoundError(page)
         self.__battle_token, = result.groups()
 
@@ -81,8 +80,7 @@ class BattleAPI:
         soup = BeautifulSoup(page, "lxml")
         self.__soups = {container_id: soup.find(id=container_id) for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
 
-        # 初始化日志，格式: 每次更新的日志列表
-        # 比如 logs[0][0] 表示初始日志的第一条
+        # 初始化记录列表。比如 logs[0][0] 表示初始记录的第一条，logs[1][1] 表示自初始记录以来第一条战斗记录
         self.logs = [[x.text for x in soup.find(id="textlog").find_all("tr")]]
 
         # 解析获取怪兽信息
