@@ -5,6 +5,7 @@
 
 import random, json, pathlib, time, re, requests
 from collections.abc import Callable
+from tqdm import tqdm
 from bs4 import BeautifulSoup
 from utils.network import request_with_retry
 from utils.battle import TokenNotFoundError
@@ -148,7 +149,8 @@ def main():
                 pass
         else:
             print("没有发现战斗事件，等待一会继续 ...")
-            time.sleep(random.randint(450, 750))
+            for _ in tqdm(range(random.randint(450, 750)), desc="Waiting"):
+                time.sleep(1)
 
 
 if __name__ == "__main__":
