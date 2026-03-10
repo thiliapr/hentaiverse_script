@@ -89,9 +89,9 @@ def arena() -> Callable[[], None] | None:
         battles.append((rounds, clear_bonus, api_data))
     
     # 筛出奖励小于 1000 的战斗，并选择最优性价比的战斗
+    battles = [battle for battle in battles if battle[1] >= 1000]
     if not battles:
         return
-    battles = [battle for battle in battles if battle[1] >= 1000]
     best_battle_data = max(battles, key=lambda x: x[1] / x[0])[-1]
     battle_func = lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Battle&ss=ar", data=best_battle_data, **request_kwargs)
     return battle_func
