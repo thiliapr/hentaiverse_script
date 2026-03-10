@@ -73,24 +73,27 @@ def arena() -> Callable[[], None] | None:
     
     # 检测可用的 Arena，并筛选
     soup = BeautifulSoup(page, "lxml")
+    arena_battles = []
     for arena in soup.find(id="arena_list").find_all("tr"):
         info = arena.find_all("td")
-        # 跳过 Table Header 行
-        if not info:
+        # 跳过 Table Header 行和不可用战斗
+        if not info or "onclick" not in (start_button := info[-1].find("img")).attrs:
             continue
-        # 检查是否可用
-        if "onclick" not in (start_button := info[-1].find("img")).attrs:
-            continue
-        # 检查奖励是否符合要求（1000 Credits）
-        clear_bonus = info[-2].text.replace(",", "").removesuffix(" C")
-        if int(clear_bonus) < 1000:
-            continue
-        # 开始战斗
+        # 获取战斗信息
+        rounds = int(info[3].text)
+        clear_bonus = int(info[-2].text.replace(",", "").removesuffix(" C"))
+        # 获取战斗 API 信息
         initid, inittoken = re.search(r"init_battle\((\d+),\d+,'(\w+)'\)", start_button.attrs["onclick"]).groups()
-        return lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Battle&ss=ar", data={"initid": initid, "inittoken": inittoken}, **request_kwargs)
-
-    # 如果没找到，则返回 None
-    return
+        api_data = {"initid": initid, "inittoken": inittoken}
+        # 记录战斗
+        arena_battles.append((rounds, clear_bonus, api_data))
+    
+    # 选择最优性价比的战斗
+    if not arena_battles:
+        return
+    best_battle_data = max(arena_battles, key=lambda x: x[1] / x[0])[-1]
+    battle_func = lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Battle&ss=ar", data=best_battle_data, **request_kwargs)
+    return battle_func
 
 
 def battle_with_skip_riddle(*args, **kwargs):
