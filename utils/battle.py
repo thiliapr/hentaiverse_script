@@ -109,19 +109,9 @@ class BattleAPI:
         textlog = [log["t"] for log in resp_json["textlog"]]
         self.logs.append(textlog)
 
-        # 解析怪兽受到的伤害，并相应地更新怪兽的生命值。你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
-        monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.get_monsters())}
-        for log in textlog:
-            monster_name = None
-            # Persistent 格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
-            if (res := BattleAPI.parse_damage(log)) is not None:
-                monster_name = res.monster_name
-                damage = res.damage
-
-            # 更新怪兽生命值
-            if monster_name in monster_name_to_idx:
-                monster = self.__monsters[monster_name_to_idx[monster_name]]
-                monster.health = int(max(monster.health - damage, 0))
+        # 更新怪兽信息
+        self.__update_monster_helath(textlog)
+        self.__update_monster_info()
 
         # 执行钩子
         for callback in self.__post_action_hooks:
@@ -135,6 +125,40 @@ class BattleAPI:
         for prefix in ["", "d"]:
             if (label := self.__soups["pane_vitals"].find(id=f"{prefix}{label_id}")):
                 return int(label.text)
+
+    def __update_monster_helath(self, textlog: list[str]):
+        # 解析怪兽受到的伤害，并相应地更新怪兽的生命值
+        # 你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
+        monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.get_monsters())}
+        for log in textlog:
+            monster_name = None
+            # Persistent 伤害日志格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
+            if (res := BattleAPI.parse_damage(log)) is not None:
+                monster_name = res.monster_name
+                damage = res.damage
+
+            # 更新怪兽生命值
+            if monster_name in monster_name_to_idx:
+                monster = self.__monsters[monster_name_to_idx[monster_name]]
+                monster.health = int(max(monster.health - damage, 0))
+
+    def __update_monster_info(self):
+        # 每次获取的时候，先更新一下状态
+        for monster, monster_element in zip(self.__monsters, self.__soups["pane_monster"].find_all(class_="btm1")):
+            # 注意: 血量、蓝量、Spirit 量条显示的都是比例缩放的值，比如满了就是 120px，一半就是 60px，非常不靠谱
+            for attr, alt in [("mana", "magic"), ("spirit", "spirit")]:
+                result = monster_element.find(alt=alt)
+                if result is None:
+                    continue
+                value = int(re.search(r"width:(\d+)px", result.attrs["style"]).group(1))
+                setattr(monster, attr, value)
+
+            # 如果怪兽不可点击，那么肯定是死了，有时候网络错误不能通过日志捕捉这一点，我们就从怪兽面板判断吧
+            if "onclick" not in monster_element.attrs:
+                monster.health = 0
+
+            # 怪兽也有 Buff
+            monster.effects = [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
 
     @staticmethod
     def parse_effect(effect_str: str) -> Effect:
@@ -160,22 +184,6 @@ class BattleAPI:
         return self.__do_action({"mode": "attack", "target": target, "skill": 0})
 
     def get_monsters(self) -> list[Monster]:
-        # 每次获取的时候，先更新一下状态
-        for monster, monster_element in zip(self.__monsters, self.__soups["pane_monster"].find_all(class_="btm1")):
-            # 注意: 血量、蓝量、Spirit 量条显示的都是比例缩放的值，比如满了就是 120px，一半就是 60px，非常不靠谱
-            for attr, alt in [("mana", "magic"), ("spirit", "spirit")]:
-                result = monster_element.find(alt=alt)
-                if result is None:
-                    continue
-                value = int(re.search(r"width:(\d+)px", result.attrs["style"]).group(1))
-                setattr(monster, attr, value)
-
-            # 如果怪兽不可点击，那么肯定是死了，有时候网络错误不能通过日志捕捉这一点，我们就从怪兽面板判断吧
-            if "onclick" not in monster_element.attrs:
-                monster.health = 0
-
-            # 怪兽也有 Buff
-            monster.effects = [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
         return self.__monsters
 
     def get_player_health(self) -> int:
