@@ -89,6 +89,7 @@ class BattleAPI:
             key=lambda x: x[0]  # 按照怪物出场的顺序排序，A 最先出场，B 第二个出场，以此类推
         )
         self.__monsters = [Monster(name=name, monster_id=monster_id, level=level, health=health) for _, monster_id, name, level, health in monsters_info]
+        self.__update_monster_info()
 
         # 初始化钩子列表
         self.__post_action_hooks = []
