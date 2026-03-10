@@ -73,7 +73,7 @@ def arena() -> Callable[[], None] | None:
     
     # 检测可用的 Arena，并筛选
     soup = BeautifulSoup(page, "lxml")
-    arena_battles = []
+    battles = []
     for arena in soup.find(id="arena_list").find_all("tr"):
         info = arena.find_all("td")
         # 跳过 Table Header 行和不可用战斗
@@ -86,12 +86,13 @@ def arena() -> Callable[[], None] | None:
         initid, inittoken = re.search(r"init_battle\((\d+),\d+,'(\w+)'\)", start_button.attrs["onclick"]).groups()
         api_data = {"initid": initid, "inittoken": inittoken}
         # 记录战斗
-        arena_battles.append((rounds, clear_bonus, api_data))
+        battles.append((rounds, clear_bonus, api_data))
     
-    # 选择最优性价比的战斗
-    if not arena_battles:
+    # 筛出奖励小于 1000 的战斗，并选择最优性价比的战斗
+    if not battles:
         return
-    best_battle_data = max(arena_battles, key=lambda x: x[1] / x[0])[-1]
+    battles = [battle for battle in battles if battle[1] >= 1000]
+    best_battle_data = max(battles, key=lambda x: x[1] / x[0])[-1]
     battle_func = lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Battle&ss=ar", data=best_battle_data, **request_kwargs)
     return battle_func
 
