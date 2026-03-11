@@ -152,8 +152,11 @@ class BattleAPI:
                 value = int(re.search(r"width:(\d+)px", result.attrs["style"]).group(1))
                 setattr(monster, attr, value)
 
-            # 如果怪兽不可点击，那么肯定是死了，有时候网络错误不能通过日志捕捉这一点，我们就从怪兽面板判断吧
-            if "onclick" not in monster_element.attrs:
+            # 如果怪兽不可点击，那么肯定是死了，否则肯定还有一点生命
+            # 有时候网络错误不能通过日志捕捉这一点，我们就从怪兽面板判断吧
+            if "onclick" in monster_element.attrs:
+                monster.health = max(monster.health,  1)
+            else:
                 monster.health = 0
 
             # 怪兽也有 Buff
