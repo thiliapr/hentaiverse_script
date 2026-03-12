@@ -175,7 +175,7 @@ class BattleAPI:
         soup = BeautifulSoup(page, "lxml")
         self.__soups = {container_id: soup.find(id=container_id) for container_id in self.__soups}
 
-        # 获取最新战斗记录。网页为了方便查看最新信息，记录从从新到旧排序的，也就是旧的在上边、新的在下边。我们得反转回来
+        # 获取最新战斗记录。网页里为了方便查看最新信息，记录是从新到旧排序的，也就是旧的在上边、新的在下边。我们得反转回来
         logs = [x.text for x in reversed(soup.find(id="textlog").find_all("tr"))]
 
         # 更新战斗记录。如果现在的战斗记录和前一个的一模一样，肯定是请求没发出去，不更新
