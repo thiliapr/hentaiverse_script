@@ -44,15 +44,12 @@ class EMA:
 
 class BattleAPIHook:
     @staticmethod
-    def display_log_after_action(_, textlog: list[str]):
+    def display_situation_after_action(api: BattleAPI, textlog: list[str]):
+        # 只在有日志的时候打印
+        if not textlog:
+            return
         print("\n".join(textlog))
-
-    @staticmethod
-    def display_player_info_after_action(api: BattleAPI, _):
         print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={', '.join(f'{effect.name}({effect.remaining_turns} Turn(s))' for effect in api.get_player_effects())}")
-
-    @staticmethod
-    def display_seperate_after_action(_1, _2):
         print("* - " * 10)
 
 
@@ -127,19 +124,15 @@ def battle():
 
     # 打印初始日志
     print("+ - " * 10)
-    BattleAPIHook.display_player_info_after_action(api, None)
-    print("\n".join(api.logs[0]))
-    BattleAPIHook.display_seperate_after_action(None, None)
+    BattleAPIHook.display_situation_after_action(api, api.logs[0])
 
     # 使每次 do_action 都实时显示 log，而不是循环最后才显示
-    api.add_post_action_hook(BattleAPIHook.display_log_after_action)
-    api.add_post_action_hook(BattleAPIHook.display_player_info_after_action)
-    api.add_post_action_hook(BattleAPIHook.display_seperate_after_action)
+    api.add_post_action_hook(BattleAPIHook.display_situation_after_action)
 
     # 检测是否需要结束前回血、是否需要叠 Buff
     # 如果分析当前回合数和总回合数没有结果，说明战斗只持续一个回合
     heal_before_end_flag = keep_buff = False
-    if (result := re.search(r"Round (\d+) / (\d+)", api.logs[0][-1])) is not None:
+    if (result := re.search(r"Round (\d+) / (\d+)", api.logs[0][0])) is not None:
         current_rounds, total_rounds = [int(x) for x in result.groups()]
         if current_rounds < total_rounds:
             heal_before_end_flag = True

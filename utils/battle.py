@@ -7,7 +7,7 @@ import re
 from typing import Any
 from collections.abc import Callable
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from pydantic import BaseModel, Field
 from utils.network import request_with_retry
 from utils.constants import MAIN_URL
@@ -68,20 +68,10 @@ class BattleAPI:
         if user_agent:
             self.__request_kwargs["headers"] = {"User-Agent": user_agent}
 
-        # 获取战斗界面
-        page = request_with_retry(requests.get, MAIN_URL, **self.__request_kwargs).text
-
-        # 获取 battle_token
-        if (result := re.search('var battle_token = "([^"]+)"', page)) is None:
-            raise TokenNotFoundError(page)
-        self.__battle_token, = result.groups()
-
-        # 解析获取各个容器的 soup
-        soup = BeautifulSoup(page, "lxml")
-        self.__soups = {container_id: soup.find(id=container_id) for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
-
-        # 初始化记录列表。比如 logs[0][0] 表示初始记录的第一条，logs[1][1] 表示自初始记录以来第一条战斗记录
-        self.logs = [[x.text for x in soup.find(id="textlog").find_all("tr")]]
+        # 根据页面更新 soup 和战斗记录
+        self.logs = []
+        self.__soups = {container_id: None for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
+        page, _ = self.__update_by_refresh_page()
 
         # 解析获取怪兽信息
         monsters_info = sorted(
@@ -97,16 +87,27 @@ class BattleAPI:
     def __do_action(self, action: dict[str, int | str]) -> list[str]:
         # 补充信息、执行动作
         action |= {"type": "battle", "method": "action", "token": self.__battle_token}
-        resp_json = request_with_retry(requests.post, f"{MAIN_URL}/json", json=action, **self.__request_kwargs).json()
+        resp_json = None
+        while True:
+            try:
+                resp_json = requests.post(f"{MAIN_URL}/json", json=action, timeout=30, **self.__request_kwargs).json()
+                break
+            # 网络错误了，但我也不知道服务器有没有接收到我的请求。为了避免鞭尸，就不再重发了，改为刷新页面获取
+            except (requests.exceptions.ChunkedEncodingError, requests.ConnectionError, requests.ReadTimeout) as e:
+                print(f"[BattleAPI.__do_action] 发生了网络错误: {e}")
+                break
 
-        # 更新各个 soup
-        for container_id in self.__soups:
-            if container_id in resp_json:
-                self.__soups[container_id] = BeautifulSoup(resp_json[container_id], "lxml")
-
-        # 添加日志到本地记录
-        textlog = [log["t"] for log in resp_json["textlog"]]
-        self.logs.append(textlog)
+        # 更新 soup 和战斗记录
+        if resp_json:
+            # 更新 soup
+            for container_id in self.__soups:
+                if container_id in resp_json:
+                    self.__soups[container_id] = BeautifulSoup(resp_json[container_id], "lxml")
+            # 添加新的战斗记录
+            textlog = [log["t"] for log in resp_json["textlog"]]
+            self.logs.append(textlog)
+        else:
+            _, textlog = self.__update_by_refresh_page()
 
         # 更新怪兽信息
         self.__update_monster_helath(textlog)
@@ -153,14 +154,38 @@ class BattleAPI:
                 setattr(monster, attr, value)
 
             # 如果怪兽不可点击，那么肯定是死了，否则肯定还有一点生命
-            # 有时候网络错误不能通过日志捕捉这一点，我们就从怪兽面板判断吧
-            if "onclick" in monster_element.attrs:
-                monster.health = max(monster.health,  1)
-            else:
-                monster.health = 0
+            alive_flag = "onclick" in monster_element.attrs
+            if (monster.health > 0) ^ alive_flag:
+                print("[BattleAPI.__do_action] 检测到错误！明明怪兽应该还活着/已死亡，却检测到已死亡/还活着")
+                breakpoint()
 
             # 怪兽也有 Buff
             monster.effects = [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
+
+    def __update_by_refresh_page(self) -> tuple[str, list[str]]:
+        # 获取战斗界面
+        page = request_with_retry(requests.get, MAIN_URL, **self.__request_kwargs).text
+
+        # 获取 battle_token
+        if (result := re.search('var battle_token = "([^"]+)"', page)) is None:
+            raise TokenNotFoundError(page)
+        self.__battle_token, = result.groups()
+
+        # 解析页面并更新 soup
+        soup = BeautifulSoup(page, "lxml")
+        self.__soups = {container_id: soup.find(id=container_id) for container_id in self.__soups}
+
+        # 获取最新战斗记录。网页为了方便查看最新信息，记录从从新到旧排序的，也就是旧的在上边、新的在下边。我们得反转回来
+        logs = [x.text for x in reversed(soup.find(id="textlog").find_all("tr"))]
+
+        # 更新战斗记录。如果现在的战斗记录和前一个的一模一样，肯定是请求没发出去，不更新
+        if self.logs and self.logs[-1] == logs:
+            print("[BattleAPI.__update_by_refresh_page] 刷新页面得到的记录和前一条记录一模一样，说明服务器压根就没接收到请求")
+            logs = []
+        else:
+            self.logs.append(logs)
+
+        return page, logs
 
     @staticmethod
     def parse_effect(effect_str: str) -> Effect:
