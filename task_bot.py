@@ -4,6 +4,7 @@
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
 import random, json, pathlib, time, re, requests
+from typing import Any
 from collections.abc import Callable
 from tqdm import tqdm
 from bs4 import BeautifulSoup
@@ -31,7 +32,7 @@ def settings(difficult_level: str):
     request_with_retry(requests.post, "https://hentaiverse.org/?s=Character&ss=se", data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"}, **request_kwargs)
 
 
-def repair_equipment() -> Callable[[], None] | None:
+def repair_equipment() -> Callable[[], Any] | None:
     resp = request_with_retry(requests.get, "https://hentaiverse.org/?s=Forge&ss=re", **request_kwargs)
     soup = BeautifulSoup(resp.text, "lxml")
     # 如果存在至少一个装备损坏，就修复装备
@@ -39,7 +40,7 @@ def repair_equipment() -> Callable[[], None] | None:
         return lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Forge&ss=re", data={"repair_all": "1"}, **request_kwargs)
 
 
-def encounter(session_cookies: dict[str, str]) -> Callable[[], None] | None:
+def encounter(session_cookies: dict[str, str]) -> Callable[[], Any] | None:
     # Random Encounter is a single-round battle that places players against common foes in order to get a lot credits and EXP.
     # 请见 Wiki: https://ehwiki.org/wiki/Random_Encounter
     cookies = request_kwargs["cookies"]
@@ -67,7 +68,7 @@ def encounter(session_cookies: dict[str, str]) -> Callable[[], None] | None:
     return battle_func
 
 
-def arena() -> Callable[[], None] | None:
+def arena() -> Callable[[], Any] | None:
     # 每隔一个小时就会回复 1 点体力值，所以有体力的时候快去打 Arena 拿 Credit 吧
     # 请见 Wiki: https://ehwiki.org/wiki/Stamina
     page = request_with_retry(requests.get, "https://hentaiverse.org/?s=Battle&ss=ar", **request_kwargs).text
