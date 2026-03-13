@@ -69,15 +69,12 @@ class BattleAPI:
             self.__request_kwargs["headers"] = {"User-Agent": user_agent}
 
         # 根据页面更新 soup 和战斗记录
-        self.logs = []
-        self.__soups = {container_id: None for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
-        page, _ = self.__update_by_refresh_page()
+        self.__containers = {container_id: None for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
+        self.__battle_token, self.__containers, initial_logs = self.__refresh_page_and_parse()
+        self.logs = [initial_logs]
 
-        # 解析获取怪兽信息
-        monsters_info = sorted(
-            re.findall(r"Spawned Monster ([A-Z]): MID=([0-9]+) \(([^)]+)\) LV=(\d+) HP=(\d+)", page),
-            key=lambda x: x[0]  # 按照怪物出场的顺序排序，A 最先出场，B 第二个出场，以此类推
-        )
+        # 解析获取怪兽信息，按怪物出场的顺序排序，A 最先出场，B 第二个出场，以此类推
+        monsters_info = sorted([x.groups() for x in [re.search(r"Spawned Monster ([A-Z]): MID=([0-9]+) \(([^)]+)\) LV=(\d+) HP=(\d+)", log) for log in initial_logs] if x is not None], key=lambda x: x[0])
         self.__monsters = [Monster(name=name, monster_id=monster_id, level=level, health=health) for _, monster_id, name, level, health in monsters_info]
         self.__update_monster_info()
 
@@ -85,29 +82,35 @@ class BattleAPI:
         self.__post_action_hooks = []
 
     def __do_action(self, action: dict[str, int | str]) -> list[str]:
-        # 补充信息、执行动作
+        # 补充信息
         action |= {"type": "battle", "method": "action", "token": self.__battle_token}
-        resp_json = None
+
+        # 告诉服务器执行动作
         while True:
+            # 发送动作包给服务器
+            resp_json = None
             try:
                 resp_json = requests.post(f"{MAIN_URL}/json", json=action, timeout=30, **self.__request_kwargs).json()
-                break
-            # 网络错误了，但我也不知道服务器有没有接收到我的请求。为了避免鞭尸，就不再重发了，改为刷新页面获取
             except (requests.exceptions.ChunkedEncodingError, requests.ConnectionError, requests.ReadTimeout) as e:
                 print(f"[BattleAPI.__do_action] 发生了网络错误: {e}")
-                break
 
-        # 更新 soup 和战斗记录
-        if resp_json:
-            # 更新 soup
-            for container_id in self.__soups:
-                if container_id in resp_json:
-                    self.__soups[container_id] = BeautifulSoup(resp_json[container_id], "lxml")
+            # 如果响应（没有发生网络错误），就用响应更新容器和战斗记录
+            if resp_json:
+                for container_id in self.__containers:
+                    if container_id in resp_json:
+                        self.__containers[container_id] = BeautifulSoup(resp_json[container_id], "lxml")
+                textlog = [log["t"] for log in resp_json["textlog"]]
+            # 否则刷新页面，检测是否发送请求成功
+            else:
+                self.__battle_token, self.__containers, textlog = self.__refresh_page_and_parse()
+                # 如果战斗记录没有更新，说明请求没发出去，再发一次
+                if self.logs[-1] == textlog:
+                    print(f"[BattleAPI.__do_action] 请求没有发送到服务器，再发一次 ...")
+                    continue
+
             # 添加新的战斗记录
-            textlog = [log["t"] for log in resp_json["textlog"]]
             self.logs.append(textlog)
-        else:
-            _, textlog = self.__update_by_refresh_page()
+            break
 
         # 更新怪兽信息
         self.__update_monster_helath(textlog)
@@ -123,7 +126,7 @@ class BattleAPI:
     def __get_player_vital(self, label_id: str) -> int | None:
         # 游戏提供两种 UI: Standard 和 Utilitarian。它们的标签有不同的 ID 前缀
         for prefix in ["", "d"]:
-            if (label := self.__soups["pane_vitals"].find(id=f"{prefix}{label_id}")):
+            if (label := self.__containers["pane_vitals"].find(id=f"{prefix}{label_id}")):
                 return int(label.text)
 
     def __update_monster_helath(self, textlog: list[str]):
@@ -144,7 +147,7 @@ class BattleAPI:
 
     def __update_monster_info(self):
         # 每次获取的时候，先更新一下状态
-        for monster, monster_element in zip(self.__monsters, self.__soups["pane_monster"].find_all(class_="btm1")):
+        for monster, monster_element in zip(self.__monsters, self.__containers["pane_monster"].find_all(class_="btm1")):
             # 注意: 血量、蓝量、Spirit 量条显示的都是比例缩放的值，比如满了就是 120px，一半就是 60px，非常不靠谱
             for attr, alt in [("mana", "magic"), ("spirit", "spirit")]:
                 result = monster_element.find(alt=alt)
@@ -161,30 +164,22 @@ class BattleAPI:
             # 怪兽也有 Buff
             monster.effects = [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
 
-    def __update_by_refresh_page(self) -> tuple[str, list[str]]:
+    def __refresh_page_and_parse(self) -> tuple[str, dict[str, Tag], list[str]]:
         # 获取战斗界面
         page = request_with_retry(requests.get, MAIN_URL, **self.__request_kwargs).text
 
         # 获取 battle_token
         if (result := re.search('var battle_token = "([^"]+)"', page)) is None:
             raise TokenNotFoundError(page)
-        self.__battle_token, = result.groups()
+        battle_token, = result.groups()
 
-        # 解析页面并更新 soup
+        # 解析页面
         soup = BeautifulSoup(page, "lxml")
-        self.__soups = {container_id: soup.find(id=container_id) for container_id in self.__soups}
+        containers = {container_id: soup.find(id=container_id) for container_id in self.__containers}
 
         # 获取最新战斗记录。网页里为了方便查看最新信息，记录是从新到旧排序的，也就是旧的在上边、新的在下边。我们得反转回来
         logs = [x.text for x in reversed(soup.find(id="textlog").find_all("tr"))]
-
-        # 更新战斗记录。如果现在的战斗记录和前一个的一模一样，肯定是请求没发出去，不更新
-        if self.logs and self.logs[-1] == logs:
-            print("[BattleAPI.__update_by_refresh_page] 刷新页面得到的记录和前一条记录一模一样，说明服务器压根就没接收到请求")
-            logs = []
-        else:
-            self.logs.append(logs)
-
-        return page, logs
+        return battle_token, containers, logs
 
     @staticmethod
     def parse_effect(effect_str: str) -> Effect:
@@ -226,13 +221,13 @@ class BattleAPI:
         return self.__get_player_vital("vrs")
 
     def get_player_effects(self) -> list[Effect]:
-        return [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__soups["pane_effects"].find_all("img")]
+        return [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__containers["pane_effects"].find_all("img")]
 
     def get_player_magics(self) -> list[Magic]:
         current_category: str
         magic_skills = []
 
-        for row in self.__soups["table_magic"].find_all("tr"):
+        for row in self.__containers["table_magic"].find_all("tr"):
             if (category_img := row.find("img")) is not None:
                 current_category = category_img.attrs["alt"]
                 continue
@@ -246,7 +241,7 @@ class BattleAPI:
 
     def get_player_items(self) -> list[Item]:
         items = []
-        for child in self.__soups["pane_item"].find_all(class_="bti1"):
+        for child in self.__containers["pane_item"].find_all(class_="bti1"):
             if (item_element := child.find(class_="bti3").find("div")) is None:
                 continue
             name = item_element.text
