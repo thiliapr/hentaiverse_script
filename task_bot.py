@@ -11,7 +11,6 @@ from utils.network import request_with_retry
 from utils.battle import TokenNotFoundError
 from battle_bot import battle
 
-GALLERY_URL = "https://e-hentai.org/g/3502641/17246a289f/"
 config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
 request_kwargs = {"cookies": {"ipb_member_id": config["ipb_member_id"], "ipb_pass_hash": config["ipb_pass_hash"]}, "headers": {"User-Agent": config["user_agent"]}}
 
@@ -46,10 +45,16 @@ def encounter(session_cookies: dict[str, str]) -> Callable[[], None] | None:
     cookies = request_kwargs["cookies"]
     headers = request_kwargs["headers"]
 
+    # 从主页获取最新的 Gallery
+    resp = request_with_retry(requests.get, "https://e-hentai.org/", **request_kwargs)
+    soup = BeautifulSoup(resp.text, "lxml")
+    galleries = [x.find(class_="glink").parent.attrs["href"] for x in soup.find("table", class_="gltc").find_all("tr") if x.find(class_="glink") is not None]
+    session_cookies.update(dict(resp.cookies))
+
     # 发送网页请求
-    if not session_cookies:
-        session_cookies.update(dict(request_with_retry(requests.get, GALLERY_URL, **request_kwargs).cookies))
-    resp = request_with_retry(requests.get, GALLERY_URL, headers=headers, cookies=cookies | session_cookies)
+    if "event" not in session_cookies:
+        session_cookies["event"] = "1"
+    resp = request_with_retry(requests.get, random.choice(galleries), headers=headers, cookies=cookies | session_cookies)
     session_cookies.update(dict(resp.cookies))
 
     # 解析检测随机遇敌事件，并点击遇敌链接
