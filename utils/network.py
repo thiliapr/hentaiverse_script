@@ -6,10 +6,9 @@
 import requests
 
 
-def request_with_retry(func, *args, retries: int = 3, **kwargs):
-    for _ in range(retries):
+def request_with_retry(func, *args, **kwargs):
+    while True:
         try:
             return func(*args, **kwargs, timeout=30)
         except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
-            print(f"网络错误: {e}")
-    raise ConnectionError("网络接连发生错误，力竭了")
+            print(f"[network.request_with_retry] 网络错误: {e}")
