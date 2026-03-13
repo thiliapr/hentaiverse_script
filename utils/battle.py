@@ -153,11 +153,10 @@ class BattleAPI:
                 value = int(re.search(r"width:(\d+)px", result.attrs["style"]).group(1))
                 setattr(monster, attr, value)
 
-            # 如果怪兽不可点击，那么肯定是死了，否则肯定还有一点生命
-            alive_flag = "onclick" in monster_element.attrs
-            if (monster.health > 0) ^ alive_flag:
-                print("[BattleAPI.__do_action] 检测到错误！明明怪兽应该还活着/已死亡，却检测到已死亡/还活着")
-                breakpoint()
+            # 有时候服务器返回日志说效果造成了什么伤害，但就是不说怪兽名，比如 "Freezing Limbs explodes for 253 cold damage"
+            # 这样就会造成怪兽生命值偏大（我有什么办法）。等到怪兽死亡时，我们就手动置零吧
+            if "onclick" not in monster_element.attrs:
+                monster.health = 0
 
             # 怪兽也有 Buff
             monster.effects = [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
