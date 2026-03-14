@@ -17,7 +17,7 @@ config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
 request_kwargs = {"cookies": {"ipb_member_id": config["ipb_member_id"], "ipb_pass_hash": config["ipb_pass_hash"]}, "headers": {"User-Agent": config["user_agent"]}}
 
 
-def attribute_point_allocation() -> str:
+def attribute_point_allocation() -> str | None:
     resp = request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=ch", **request_kwargs)
     soup = BeautifulSoup(resp.text, "lxml")
 
@@ -35,7 +35,6 @@ def attribute_point_allocation() -> str:
     if int_delta or wis_delta:
         request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=ch", data={"attr_apply": "1"} | {f"{attr}_delta": "0" for attr in ["str", "dex", "agi", "end"]} | {"int_delta": int_delta, "wis_delta": wis_delta}, **request_kwargs)
         return "Intelligence" if int_delta else "Wisdom"
-    return "None"
 
 
 def settings(difficult_level: str):
@@ -178,8 +177,8 @@ def main():
             
             # 战后尝试加点
             print("正在尝试加点 ...")
-            attr = attribute_point_allocation()
-            print(f"已为属性 {attr} 加了一点！")
+            if attr := attribute_point_allocation():
+                print(f"已为属性 {attr} 加了一点！")
         else:
             print("没有发现战斗事件，等待一会继续 ...")
             for _ in tqdm(range(random.randint(450, 750)), desc="Waiting"):
