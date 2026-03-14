@@ -113,10 +113,24 @@ class BattleTool:
 
     @staticmethod
     def control_monster(api: BattleAPI, monster_idx: int, with_sleep: bool):
-        if not any(effect.name in (["Asleep"] if with_sleep else []) + ["Silenced", "Blinded", "Weakened"] for effect in api.get_monsters()[monster_idx].effects):
-            for magic_name in (["Sleep"] if with_sleep else []) + ["Silence", "Blind", "Weaken"]:
-                if BattleTool.try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
-                    break
+        control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
+        if with_sleep:
+            control_magic_and_effect.insert(("Sleep", "Asleep"))
+
+        # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
+        best_effect = control_magic_and_effect[0][1]
+        monster = api.get_monsters()[monster_idx]
+        if any(effect.name == best_effect for effect in monster.effects):
+            return
+
+        # 按顺序施展控制效果
+        for magic_name, effect_name in control_magic_and_effect:
+            # 怪兽已经有这个 Debuff 就不用叠了，叠下一个
+            if any(effect.name == effect_name for effect in monster.effects):
+                continue
+            # 给怪兽叠其他 Debuff
+            if BattleTool.try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
+                break
 
 
 def battle():
