@@ -130,7 +130,15 @@ class BattleTool:
                 continue
             # 给怪兽叠其他 Debuff
             if BattleTool.try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
-                break
+                return
+
+    @staticmethod
+    def imperil_monster(api: BattleAPI, monster_idx: int):
+        # 如果已经存在对应效果，就跳过
+        if any(effect.name == "Imperiled" for effect in api.get_monsters()[monster_idx].effects):
+            return
+        # 降低怪兽的物理、魔法和元素的减伤
+        BattleTool.try_to_use(api, "magic", "Imperil", BattleAPI.MONSTER_START_ID + monster_idx)
 
 
 def battle():
@@ -216,6 +224,11 @@ def battle():
             for monster_idx in bosses:
                 # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
                 BattleTool.control_monster(api, monster_idx, False)
+
+            # 如果所有怪兽都被叠了控制 Debuff，那么就给他们叠破防 Debuff
+            if all(any(effect.name == "Silenced" for effect in api.get_monsters()[monster_idx].effects) for monster_idx in bosses):
+                for monster_idx in bosses:
+                    BattleTool.imperil_monster(api, monster_idx)
 
         # 攻击死最多的、伤害最多的、打中最多的
         target_score = []
