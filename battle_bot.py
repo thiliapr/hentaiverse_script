@@ -115,7 +115,7 @@ class BattleTool:
     def control_monster(api: BattleAPI, monster_idx: int, with_sleep: bool):
         control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
         if with_sleep:
-            control_magic_and_effect.insert(("Sleep", "Asleep"))
+            control_magic_and_effect.insert(0, ("Sleep", "Asleep"))
 
         # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
         best_effect = control_magic_and_effect[0][1]
