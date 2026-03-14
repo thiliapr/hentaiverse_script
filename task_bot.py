@@ -8,6 +8,7 @@ from typing import Any
 from collections.abc import Callable
 from tqdm import tqdm
 from bs4 import BeautifulSoup
+from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 from utils.battle import TokenNotFoundError
 from battle_bot import battle
@@ -16,8 +17,29 @@ config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
 request_kwargs = {"cookies": {"ipb_member_id": config["ipb_member_id"], "ipb_pass_hash": config["ipb_pass_hash"]}, "headers": {"User-Agent": config["user_agent"]}}
 
 
+def attribute_point_allocation() -> str:
+    resp = request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=ch", **request_kwargs)
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    # 获取空余点数、Intelligence 加点要求经验、Wisdom 加点要求经验
+    remaining_exp, int_exp, wis_exp = [int(soup.find(id=label_id).text.replace(",", "")) for label_id in ["remaining_exp", "int_left", "wis_left"]]
+
+    # 优先加点 Wisdom，尽量保持均衡
+    int_delta = wis_delta = 0
+    if wis_exp > int_exp and remaining_exp >= int_exp:
+        int_delta = 1
+    elif remaining_exp >= wis_exp:
+        wis_delta = 1
+    
+    # 发送请求
+    if int_delta or wis_delta:
+        request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=ch", data={"attr_apply": "1"} | {f"{attr}_delta": "0" for attr in ["str", "dex", "agi", "end"]} | {"int_delta": int_delta, "wis_delta": wis_delta}, **request_kwargs)
+        return "Intelligence" if int_delta else "Wisdom"
+    return "None"
+
+
 def settings(difficult_level: str):
-    resp = request_with_retry(requests.get, "https://hentaiverse.org/?s=Character&ss=se", **request_kwargs)
+    resp = request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=se", **request_kwargs)
     soup = BeautifulSoup(resp.text, "lxml")
 
     # 获取字体信息
@@ -29,15 +51,15 @@ def settings(difficult_level: str):
     vitalstyle = "d"
 
     # 更改设置
-    request_with_retry(requests.post, "https://hentaiverse.org/?s=Character&ss=se", data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"}, **request_kwargs)
+    request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=se", data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"}, **request_kwargs)
 
 
 def repair_equipment() -> Callable[[], Any] | None:
-    resp = request_with_retry(requests.get, "https://hentaiverse.org/?s=Forge&ss=re", **request_kwargs)
+    resp = request_with_retry(requests.get, f"{MAIN_URL}/?s=Forge&ss=re", **request_kwargs)
     soup = BeautifulSoup(resp.text, "lxml")
     # 如果存在至少一个装备损坏，就修复装备
     if soup.find(class_="equiplist").find(class_="eqp"):
-        return lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Forge&ss=re", data={"repair_all": "1"}, **request_kwargs)
+        return lambda: request_with_retry(requests.post, f"{MAIN_URL}/?s=Forge&ss=re", data={"repair_all": "1"}, **request_kwargs)
 
 
 def encounter(session_cookies: dict[str, str]) -> Callable[[], Any] | None:
@@ -71,7 +93,7 @@ def encounter(session_cookies: dict[str, str]) -> Callable[[], Any] | None:
 def arena() -> Callable[[], Any] | None:
     # 每隔一个小时就会回复 1 点体力值，所以有体力的时候快去打 Arena 拿 Credit 吧
     # 请见 Wiki: https://ehwiki.org/wiki/Stamina
-    page = request_with_retry(requests.get, "https://hentaiverse.org/?s=Battle&ss=ar", **request_kwargs).text
+    page = request_with_retry(requests.get, f"{MAIN_URL}/?s=Battle&ss=ar", **request_kwargs).text
 
     # 获取体力值并检测是否符合条件
     stamina, = re.search(r"Stamina: (\d+)", page).groups()
@@ -100,7 +122,7 @@ def arena() -> Callable[[], Any] | None:
     if not battles:
         return
     best_battle_data = max(battles, key=lambda x: x[1] / x[0])[-1]
-    battle_func = lambda: request_with_retry(requests.post, "https://hentaiverse.org/?s=Battle&ss=ar", data=best_battle_data, **request_kwargs)
+    battle_func = lambda: request_with_retry(requests.post, f"{MAIN_URL}/?s=Battle&ss=ar", data=best_battle_data, **request_kwargs)
     return battle_func
 
 
@@ -153,6 +175,11 @@ def main():
             except TokenNotFoundError:
                 # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
                 pass
+            
+            # 战后尝试加点
+            print("正在尝试加点 ...")
+            attr = attribute_point_allocation()
+            print(f"已为属性 {attr} 加了一点！")
         else:
             print("没有发现战斗事件，等待一会继续 ...")
             for _ in tqdm(range(random.randint(450, 750)), desc="Waiting"):
