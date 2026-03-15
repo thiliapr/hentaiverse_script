@@ -181,7 +181,8 @@ def main():
                 print(f"已为属性 {attr} 加了一点！")
         else:
             print("没有发现战斗事件，等待一会继续 ...")
-            for _ in tqdm(range(random.randint(450, 750)), desc="Waiting"):
+            # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"
+            for _ in tqdm(range(random.randint(1550, 2050)), desc="Waiting"):
                 time.sleep(1)
 
 
