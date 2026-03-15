@@ -5,7 +5,7 @@
 
 import json, pathlib, random, re, copy
 from typing import Literal, Callable
-from utils.battle import BattleAPI, Monster
+from utils.battle import BattleAPI, Effect, Monster
 
 # 根据你自己的经验去设置
 BOSS_HELATH_THRESHOLD = 5000  # BOSS 是有多少血量以上的怪兽
@@ -48,9 +48,23 @@ class BattleAPIHook:
         # 只在有日志的时候打印
         if not textlog:
             return
+        
+        # 打印玩家和场上怪兽信息
+        def format_effects_str(effects: list[Effect]) -> str:
+            effect_strings = []
+            for effect in effects:
+                effect_str = f"{effect.name}({effect.remaining_turns} Turn"
+                if effect.remaining_turns > 1:
+                    effect_str += "s"
+                effect_str += ")"
+                effect_strings.append(effect_str)
+            return ", ".join(effect_strings)
+
         print("\n".join(textlog))
-        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={', '.join(f'{effect.name}({effect.remaining_turns} Turn(s))' for effect in api.get_player_effects())}")
-        print("* - " * 10)
+        print("+ - " * 10)
+        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={format_effects_str(api.get_player_effects())}")
+        print("\n".join(f"Monster {monster.name}: Health={monster.health}; Mana={monster.mana}; Spirit={monster.spirit}; Effects={format_effects_str(monster.effects)}" for monster in api.get_monsters()))
+        print("# = " * 16)
 
 
 class BattleTool:
@@ -145,7 +159,7 @@ def battle():
     api = BattleAPI(config["ipb_member_id"], config["ipb_pass_hash"], config["user_agent"])
 
     # 打印初始日志
-    print("+ - " * 10)
+    print("= - " * 20)
     BattleAPIHook.display_situation_after_action(api, api.logs[0])
 
     # 使每次 do_action 都实时显示 log，而不是循环最后才显示
