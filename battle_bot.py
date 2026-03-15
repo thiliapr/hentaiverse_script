@@ -45,11 +45,14 @@ class EMA:
 class BattleAPIHook:
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
-        # 只在有日志且游戏未结束的时候打印
-        if not textlog or all(monster.health == 0 for monster in api.get_monsters()):
+        # 只在有日志的时候打印战斗记录
+        if not textlog:
             return
-        
-        # 打印玩家和场上怪兽信息
+
+        # 如果游戏尚未结束，打印玩家和场上怪兽信息
+        if all(monster.health == 0 for monster in api.get_monsters()):
+            return
+
         def format_effects_str(effects: list[Effect]) -> str:
             effect_strings = []
             for effect in effects:
