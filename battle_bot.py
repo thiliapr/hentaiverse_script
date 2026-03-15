@@ -46,7 +46,7 @@ class BattleAPIHook:
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
         # 只在有日志且游戏未结束的时候打印
-        if not textlog and all(monster.health == 0 for monster in api.get_monsters()):
+        if not textlog or all(monster.health == 0 for monster in api.get_monsters()):
             return
         
         # 打印玩家和场上怪兽信息
