@@ -52,6 +52,7 @@ class BattleAPIHook:
 
         # 如果游戏尚未结束，打印玩家和场上怪兽信息
         if all(monster.health == 0 for monster in api.get_monsters()):
+            print("- - " * 20)
             return
 
         def format_effects_str(effects: list[Effect]) -> str:
