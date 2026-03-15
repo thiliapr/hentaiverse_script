@@ -66,7 +66,7 @@ class BattleAPIHook:
         print("\n".join(textlog))
         print("+ - " * 10)
         print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={format_effects_str(api.get_player_effects())}")
-        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana}; Spirit={monster.spirit}; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.get_monsters()) if monster.health))
+        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.get_monsters()) if monster.health))
         print("# = " * 16)
 
 
