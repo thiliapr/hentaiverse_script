@@ -3,6 +3,7 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
+import time
 import requests
 
 
@@ -12,3 +13,4 @@ def request_with_retry(func, *args, **kwargs):
             return func(*args, **kwargs, timeout=30)
         except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
             print(f"[network.request_with_retry] 网络错误: {e}")
+            time.sleep(1)
