@@ -48,6 +48,7 @@ class BattleAPIHook:
         # 只在有日志的时候打印战斗记录
         if not textlog:
             return
+        print("\n".join(textlog))
 
         # 如果游戏尚未结束，打印玩家和场上怪兽信息
         if all(monster.health == 0 for monster in api.get_monsters()):
@@ -63,7 +64,6 @@ class BattleAPIHook:
                 effect_strings.append(effect_str)
             return ", ".join(effect_strings)
 
-        print("\n".join(textlog))
         print("+ - " * 10)
         print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={format_effects_str(api.get_player_effects())}")
         print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.get_monsters()) if monster.health))
