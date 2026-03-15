@@ -45,8 +45,8 @@ class EMA:
 class BattleAPIHook:
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
-        # 只在有日志的时候打印
-        if not textlog:
+        # 只在有日志且游戏未结束的时候打印
+        if not textlog and all(monster.health == 0 for monster in api.get_monsters()):
             return
         
         # 打印玩家和场上怪兽信息
@@ -63,7 +63,7 @@ class BattleAPIHook:
         print("\n".join(textlog))
         print("+ - " * 10)
         print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={format_effects_str(api.get_player_effects())}")
-        print("\n".join(f"Monster {monster.name}: Health={monster.health}; Mana={monster.mana}; Spirit={monster.spirit}; Effects={format_effects_str(monster.effects)}" for monster in api.get_monsters()))
+        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana}; Spirit={monster.spirit}; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.get_monsters()) if monster.health))
         print("# = " * 16)
 
 
