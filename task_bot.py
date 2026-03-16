@@ -148,7 +148,7 @@ def main():
         print("检测战斗事件 ...")
         # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
         if battle_func := encounter(encounter_cookies):
-            event, difficult_level = "随机遇敌事件", "3"
+            event, difficult_level = "随机遇敌事件", "2"
         # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
         elif battle_func := arena():
             event, difficult_level = "Arena 战斗", "1"
