@@ -143,7 +143,7 @@ def battle_with_skip_riddle(*args, **kwargs):
 def main():
     # 初始化随机遇敌函数内部状态
     encounter_cookies = {}
-    
+
     while True:
         print("检测战斗事件 ...")
         # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
@@ -174,7 +174,7 @@ def main():
             except TokenNotFoundError:
                 # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
                 pass
-            
+
             # 战后尝试加点
             print("正在尝试加点 ...")
             if attr := attribute_point_allocation():
