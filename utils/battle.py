@@ -108,7 +108,7 @@ class BattleAPI:
                     print(f"[BattleAPI.__do_action] 请求没有发送到服务器，再发一次 ...")
                     continue
                 # 如果战斗记录包含 "Initializing" 而且之前存在过其他战斗记录，说明这是一个新的、不同于之前的战斗。原因是服务器的确已经收到了请求，并i企鹅这个请求终结了所有怪兽、结束了战斗，但是客户端接收这个消息时发生了网络错误，那么我们就手动将所有怪兽的生命置零吧
-                if len(self.logs) > 1 and any("Initializing" in log for log in self.logs):
+                if len(self.logs) > 1 and any("Initializing" in log for log in textlog):
                     print("[BattleAPI.__do_action] 服务器已经开启新的战斗")
                     for monster in self.__monsters:
                         monster.health = 0
