@@ -14,7 +14,7 @@ from utils.battle import TokenNotFoundError
 from battle_bot import battle
 
 config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
-request_kwargs = {"cookies": {"ipb_member_id": config["ipb_member_id"], "ipb_pass_hash": config["ipb_pass_hash"]}, "headers": {"User-Agent": config["user_agent"]}}
+request_kwargs = {"cookies": {"ipb_member_id": config["authentication"]["ipb_member_id"], "ipb_pass_hash": config["authentication"]["ipb_pass_hash"]}, "headers": {"User-Agent": config["authentication"]["user_agent"]}}
 
 
 def attribute_point_allocation() -> list[str]:
