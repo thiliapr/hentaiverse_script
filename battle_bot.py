@@ -224,8 +224,8 @@ class BattleBot:
 
         # 丢弃无用物品
         for item_name in ["Mystic Gem", "Spirit Gem"]:
-            if self.__try_to_use("item", item_name):
-                break
+            if action := self.__try_to_use("item", item_name):
+                return [(action, 0)]
 
         # 战斗结束前策略
         monster_health = [(idx, monster.health) for idx, monster in enumerate(self.api.get_monsters()) if monster.health > 0]
