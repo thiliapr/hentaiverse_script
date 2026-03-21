@@ -101,7 +101,7 @@ class BattleBot:
                 self.heal_before_end_flag = True
             if total_rounds > self.config.draught_buff_round_threshold:
                 self.draught_buff = True
-        if sum(monster.health for monster in self.api.get_monsters()) > self.config.elite_health_threshold * 3:
+        if any(monster.health > self.config.elite_health_threshold * 2 for monster in self.api.get_monsters()):
             self.draught_buff = True
 
     @staticmethod
