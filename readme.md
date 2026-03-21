@@ -19,14 +19,29 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
 - `task_bot.py`: 根据`battle_bot.py`写的自动做任务脚本，包括检测体力值并进行[Arena](https://ehwiki.org/wiki/Arena)战斗、浏览[E-Hentai Gallery](https://ehwiki.org/wiki/Galleries)并进行[随机遇敌事件](https://ehwiki.org/wiki/Random_Encounter)，并简单地忽略[小马谜题](https://ehwiki.org/wiki/RiddleMaster)（注意，小马谜题错误率过高会导致体力消耗过快，请慎重使用）
 
 ### 快速使用
-1. 调整`battle_bot.py`的常量到你自己的经验值
-2. 填写`config.json`并保存，示例如下（`ipb_member_id`和`ipb_pass_hash`获取方法请见[前作的介绍](https://github.com/thiliapr/hentaiverse_battle_bot/?tab=readme-ov-file#%E6%B5%81%E7%A8%8B)）
+1. 填写`config.json`并保存，示例如下（`ipb_member_id`和`ipb_pass_hash`获取方法请见[前作的介绍](https://github.com/thiliapr/hentaiverse_battle_bot/?tab=readme-ov-file#%E6%B5%81%E7%A8%8B)）
    ```json
    {
-       "ipb_member_id": "19890604",
-       "ipb_pass_hash": "deadbeefdeadbeefdeadbeefdeadbeef",
-       "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+       "authentication": {
+           "ipb_member_id": "19890604",
+           "ipb_pass_hash": "deadbeefdeadbeefdeadbeefdeadbeef",
+           "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+       },
+       "battle_bot": {
+           "elite_health_threshold": 1000,
+           "critical_health_line": 50,
+           "normal_healing_line": 100,
+           "mana_supply_line": 20,
+           "pre_battle_health_reserve": 200,
+           "pre_battle_mana_reserve": 20,
+           "draught_buff_round_threshold": 5,
+           "epsilon": 0.3
+       }
    }
+   ```
+2. 创建文件`skill_data.json`和`monster_data.json`，内容如下
+   ```json
+   {}
    ```
 3. 运行`python task_bot.py`，大功告成
 
