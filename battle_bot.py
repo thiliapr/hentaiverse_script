@@ -3,43 +3,303 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, random, re, copy
-from typing import Literal, Callable
-from utils.battle import BattleAPI, Effect, Monster
-
-# 根据你自己的经验去设置
-BOSS_HELATH_THRESHOLD = 5000  # BOSS 是有多少血量以上的怪兽
-DEFAULT_MAGIC_DAMAGE = 10000  # 不知道一个魔法多少伤害时，瞎蒙的缺省值
-DEFAULT_PHYSICS_DAMAGE = 10000  # 不知道普通攻击多少伤害时，瞎蒙的缺省值
-ICU_HEALTH_THRESHOLD = 1000  # 什么时候是快死了的状态，低于这个血量会想尽一切办法回血
-DOCTOR_HEALTH_THRESHOLD = 2100  # 什么时候回复生命，低于这个血量会尝试回血
-MANA_RESTORE_THRESHOLD = 400  # 什么时候回复蓝量，低于这个蓝量会尝试用药水回蓝
-EXPECT_HEALTH_BEFORE_END = 2000  # 战斗将要结束时，你期望有多少血量
-EXPECT_MANA_BEFORE_END = 400  # 战斗将要结束时，你期望有多少蓝量
-
-# 低级设置
-EMA_MULTIPLIER = 0.99  # 1 - EMA 衰减因子
-EPSILON = 0.3  # 探索率，越高越冒险，越低越死板守旧
-
-# 脚本预设，没事别动
-SKILL_DATA_FILE = pathlib.Path("skill_data.json")
-MONSTER_DATA_FILE = pathlib.Path("monster_data.json")
-config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
-MONSTER_TEMPLATE = {"relative_damage": {"sum_value": 0, "sum_weight": 0}}
-SKILL_TEMPLATE = {"attack_range": 0, "damage": {"sum_value": 0, "sum_weight": 0}}
-all_skill_data = json.loads(SKILL_DATA_FILE.read_text("utf-8"))
-all_monster_data = json.loads(MONSTER_DATA_FILE.read_text("utf-8"))
+import json, pathlib, random, re
+from typing import Literal
+from pydantic import BaseModel, Field
+from utils.battle import BattleAPI, Effect, Item, Magic, Monster
 
 
-class EMA:
+class EWMAData(BaseModel):
+    weighted_sum: float = Field(0, description="所有历史数据的加权和")
+    total_weight: float = Field(0, ge=0, description="所有历史数据的权重的和")
+    multiplier: float = Field(1, gt=0, exclude=True, description="数据权重衰减因子，默认为 1（表示无衰减，即算术平均）")
+
+    def add_observation(self, new_value: float):
+        # weighted_sum = data[-1] + multiplier * data[-2] + multiplier ** 2 * data[-3] + ... = data[-1] + multiplier * (data[-2] + multiplier * (data[-3] + ...))
+        # total_weight = 1 + multiplier + multiplier ** 2 + multiplier ** 3 = 1 + multiplier * (1 + multiplier * (1 + multiplier * (1 + ...)))
+        self.weighted_sum = self.weighted_sum * self.multiplier + new_value
+        self.total_weight = self.total_weight * self.multiplier + 1
+
+    def get_current_average(self) -> float:
+        return self.weighted_sum / self.total_weight
+
+
+class SkillData(BaseModel):
+    attack_range: int = Field(0, ge=0, description="技能的攻击范围（能攻击除目标以外，能攻击目标上下各多少只怪兽）")
+    damage: EWMAData = Field(default_factory=EWMAData, description="技能的基础伤害")
+
+
+class MonsterData(BaseModel):
+    damage_multiplier: dict[str, EWMAData] = Field(default_factory=dict, description="特定技能攻击该怪兽，造成的相对于技能基础伤害的倍数。比如技能基础伤害 1000，相对倍数 1.1，那么计算该技能对怪兽造成的伤害就是 1100")
+
+
+class BattleBotConfig(BaseModel):
+    elite_health_threshold: int = Field(1000, gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
+    critical_health_line: int = Field(50, gt=0, description="濒死判定线，低于此值将不计代价回血")
+    normal_healing_line: int = Field(100, gt=0, description="治疗触发阈值，低于此值尝试恢复生命")
+    mana_supply_line: int = Field(20, gt=0, description="魔力补给触发阈值，低于此值尝试恢复魔力")
+    pre_battle_health_reserve: int = Field(200, gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
+    pre_battle_mana_reserve: int = Field(20, gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
+    draught_buff_round_threshold: int = Field(5, gt=0, description="持续回复Buff触发回合阈值。当战斗总回合数超过此值时，使用 Health Draught 和 Mana Draught 获取持续的血量、蓝量回复效果")
+    ewma_multiplier: float = Field(0.99, gt=0, description="EMWA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
+    epsilon: float = Field(0.1, description="随机探索率，越大越激进，越小越保守")
+
+
+class AuthenticationConfig(BaseModel):
+    ipb_member_id: str
+    ipb_pass_hash: str
+    user_agent: str | None = None
+
+
+class BaseAction(BaseModel):
+    action_type: Literal["item", "magic", "attack", "defend"]
+    logging_skill_id: str | None = Field(None, description="如果存在，则根据指定的技能 ID 记录该动作造成的伤害")
+
+
+class ActionItem(BaseAction):
+    action_type: Literal["item"] = Field("item")
+    item: Item
+
+
+class ActionMagic(BaseAction):
+    action_type: Literal["magic"] = Field("magic")
+    magic: Magic
+    target: int
+
+
+class ActionAttack(BaseAction):
+    action_type: Literal["attack"] = Field("attack")
+    target: int
+
+
+class ActionDefend(BaseAction):
+    action_type: Literal["defend"] = Field("defend")
+
+
+class BattleBot:
+    def __init__(self, api: BattleAPI, config: BattleBotConfig, skill_data: dict[str, SkillData], monster_data: dict[str, MonsterData]):
+        self.api = api
+        self.config = config
+        self.skill_data = skill_data
+        self.monster_data = monster_data
+        self.__init_ewma_multiplier()
+        self.__init_flags()
+
+    def __init_ewma_multiplier(self):
+        for data in [
+            *[x.damage for x in self.skill_data.values()],
+            *[y for x in self.monster_data.values() for y in x.damage_multiplier.values()]
+        ]:
+            data.multiplier = self.config.ewma_multiplier
+
+    def __init_flags(self):
+        # 检测是否需要结束前回血、是否需要叠回血和回蓝 Buff
+        self.heal_before_end_flag = self.draught_buff = False
+        if (result := re.search(r"Round (\d+) / (\d+)", self.api.logs[0][0])) is not None:
+            current_rounds, total_rounds = [int(x) for x in result.groups()]
+            if current_rounds < total_rounds:
+                self.heal_before_end_flag = True
+            if total_rounds > self.config.draught_buff_round_threshold:
+                self.draught_buff = True
+        if sum(monster.health for monster in self.api.get_monsters()) > self.config.elite_health_threshold * 3:
+            self.draught_buff = True
+
     @staticmethod
-    def predict(data: dict[str, float]) -> float:
-        return data["sum_value"] / data["sum_weight"]
+    def __has_effect(effect_name: str, effects: list[Effect]) -> bool:
+        return any(effect.name == effect_name for effect in effects)
 
-    @staticmethod
-    def update(data: dict[str, float], new_value: float):
-        data["sum_value"] = data["sum_value"] * EMA_MULTIPLIER + new_value
-        data["sum_weight"] = data["sum_weight"] * EMA_MULTIPLIER + 1
+    def __try_to_use(self, category: Literal["magic", "item"], name: str, **kwargs) -> ActionItem | ActionMagic | None:
+        if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
+            return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
+
+    def __heal(self, magic_only: bool, magic_first: bool = True) -> BaseAction | None:
+        # 获取魔法治疗动作
+        action_magic = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID)
+
+        # 如果魔法可用并且指定优先使用魔法，或者只允许使用魔法（不允许消耗品），则直接返回魔法
+        if (action_magic and magic_first) or magic_only:
+            return action_magic
+
+        # 尝试使用消耗品，不行就再试试魔法
+        for item_name in ["Health Gem", "Health Potion"]:
+            if action_consumable := self.__try_to_use("item", item_name):
+                return action_consumable
+        return action_magic
+
+    def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
+        control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
+        if with_sleep:
+            control_magic_and_effect.insert(0, ("Sleep", "Asleep"))
+
+        # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
+        best_effect = control_magic_and_effect[0][1]
+        monster = self.api.get_monsters()[monster_idx]
+        if BattleBot.__has_effect(best_effect, monster.effects):
+            return
+
+        # 按顺序施展控制效果
+        for magic_name, effect_name in control_magic_and_effect:
+            # 怪兽已经有这个 Debuff 就不用叠了，叠下一个
+            if BattleBot.__has_effect(effect_name, monster.effects):
+                continue
+            # 给怪兽叠 Debuff
+            if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
+                return action
+
+    def __predict_damage(self, skill_id: str, monster: Monster) -> int:
+        if skill_id not in self.skill_data:
+            return 19890604
+        skill_base_damage = self.skill_data[skill_id].damage.get_current_average()
+
+        multiplier = 1
+        if (monster_data := self.monster_data.get(str(monster.monster_id))) is not None:
+            if skill_id in monster_data.damage_multiplier:
+                multiplier = monster_data.damage_multiplier[skill_id].get_current_average()
+        return skill_base_damage * multiplier
+
+    def __update_after_action(self, action: ActionMagic | ActionAttack, textlog: list[str]):
+        # 分析伤害
+        damage_info = []
+        for log in textlog:
+            if (res := BattleAPI.parse_damage(log)) is not None:
+                if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(self.api.get_monsters()) if monster.name == res.monster_name), None)) is not None:
+                    monster_id, monster_index = monster_info
+                    damage_info.append((monster_index, monster_id, int(res.damage)))
+
+        # 没有造成任何伤害时跳过数据库更新
+        if not damage_info:
+            return textlog
+        monster_indices, _, damage_list = zip(*damage_info)
+
+        # 更新技能数据（伤害和范围）
+        skill_data = self.skill_data.setdefault(action.logging_skill_id, SkillData(damage=EWMAData(multiplier=self.config.ewma_multiplier)))
+        skill_data.damage.add_observation(sum(damage_list) / len(damage_list))
+        target_monster_idx = action.target - BattleAPI.MONSTER_START_ID
+        skill_data.attack_range = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data.attack_range)
+
+        # 更新怪兽数据，用技能基础伤害的倍数表示
+        skill_base_damage = skill_data.damage.get_current_average()
+        for _, monster_id, damage in damage_info:
+            self.monster_data.setdefault(monster_id, MonsterData()).damage_multiplier.setdefault(action.logging_skill_id, EWMAData(multiplier=self.config.ewma_multiplier)).add_observation(damage / skill_base_damage)
+
+        return textlog
+
+    def execute_action(self, action: BaseAction) -> list[str]:
+        # 执行动作，获得战斗记录
+        if action.action_type == "attack":
+            textlog = self.api.do_attack(action.target)
+        elif action.action_type == "defend":
+            textlog = self.api.do_defend()
+        elif action.action_type == "item":
+            textlog = self.api.use_item(action.item)
+        elif action.action_type == "magic":
+            textlog = self.api.use_magic(action.magic, action.target)
+
+        # 记录伤害
+        if action.logging_skill_id:
+            self.__update_after_action(action, textlog)
+
+        return textlog
+
+    def decide(self) -> list[tuple[BaseAction, tuple | int]]:
+        # 敌人血厚时，要有持续回血、回蓝的 Buff
+        if self.draught_buff:
+            for item_name, effect_name in [("Health Draught", "Regeneration"), ("Mana Draught", "Replenishment")]:
+                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("item", item_name)):
+                    return [(action, 0)]
+
+        # 急救回血和普通回血
+        if self.api.get_player_health() < self.config.critical_health_line:
+            if action := self.__heal(magic_only=False, magic_first=False):
+                return [(action, 0)]
+        if self.api.get_player_health() < self.config.normal_healing_line:
+            if action := self.__heal(magic_only=True):
+                return [(action, 0)]
+
+        # 药水回蓝
+        if self.api.get_player_mana() < self.config.mana_supply_line:
+            for item_name in ["Mana Gem", "Mana Potion"]:
+                if action := self.__try_to_use("item", item_name):
+                    return [(action, 0)]
+
+        # 丢弃无用物品
+        for item_name in ["Mystic Gem", "Spirit Gem"]:
+            if self.__try_to_use("item", item_name):
+                break
+
+        # 战斗结束前策略
+        monster_health = [(idx, monster.health) for idx, monster in enumerate(self.api.get_monsters()) if monster.health > 0]
+        if len(monster_health) == 1:
+            monster_idx, health = monster_health[0]
+
+            # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
+            if self.heal_before_end_flag and (self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
+                # 给敌人打麻药
+                if action := self.__control_monster(monster_idx, with_sleep=True):
+                    return [(action, 0)]
+
+                # 尝试回血到期望值 
+                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(magic_only=False, magic_first=True)):
+                    return [(action, 0)]
+
+                # 尝试回蓝到期望值
+                if self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
+                    for item_name in ["Mana Gem", "Mana Potion"]:
+                        if action := self.__try_to_use("item", item_name):
+                            return [(action, 0)]
+                    return [(ActionDefend(), 0)]
+
+            # 如果只有一个怪，而且血量很低，普通攻击
+            if health < self.__predict_damage("Attack/Attack", self.api.get_monsters()[monster_idx]):
+                return [(ActionAttack(target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id="Attack/Attack"), 0)]
+
+        # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
+        bosses = [(monster_idx, monster) for monster_idx, monster in enumerate(self.api.get_monsters()) if monster.health > self.config.elite_health_threshold]
+        if len(bosses) == sum(monster.health > 0 for monster in self.api.get_monsters()):
+            for monster_idx, _ in bosses:
+                # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
+                if action := self.__control_monster(monster_idx, with_sleep=False):
+                    return [(action, 0)]
+
+            # 如果所有怪兽都被叠了控制 Debuff，那么就给他们叠破防 Debuff
+            if all(BattleBot.__has_effect("Silenced", monster.effects) for _, monster in bosses):
+                for monster_idx, monster in bosses:
+                    if BattleBot.__has_effect("Imperiled", monster.effects):
+                        continue
+                    if action := self.__try_to_use("magic", "Imperil", target=BattleAPI.MONSTER_START_ID + monster_idx):
+                        return [(action, 0)]
+
+        # 选择攻击魔法和目标
+        action_scores = []
+        for magic in self.api.get_player_magics():
+            if magic.category != "magic_damage" or not magic.available:
+                continue
+            for monster_idx in range(len(self.api.get_monsters())):
+                # Stop beating dead ponies
+                if self.api.get_monsters()[monster_idx].health == 0:
+                    continue
+
+                # 获取攻击范围窗口
+                skill_id = f"Magic/{magic.name}"
+                attack_range = self.skill_data[skill_id].attack_range if skill_id in self.skill_data else 0
+                window = self.api.get_monsters()[max(monster_idx - attack_range, 0):monster_idx + attack_range + 1]
+                window = [monster for monster in window if monster.health > 0]
+
+                # 从历史数据预测伤害，计算指标
+                damages = [self.__predict_damage(skill_id, monster) for monster in window]
+                will_die = sum(monster.health < damage for monster, damage in zip(window, damages))
+                kill_deficit = sum(max(monster.health - damage, 0) for monster, damage in zip(window, damages))
+                hit_number = len(window)
+                damage_sum = sum(min(damage, monster.health) for monster, damage in zip(window, damages))
+                damage_per_mana = damage_sum / magic.mana_cost
+
+                # 添加进候选人名单
+                action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, hit_number, damage_per_mana)))
+
+        # 返回可用动作
+        if action_scores:
+            return action_scores
+        return [(ActionDefend(), 0)]
 
 
 class BattleAPIHook:
@@ -71,218 +331,45 @@ class BattleAPIHook:
         print("# = " * 16)
 
 
-class BattleTool:
-    @staticmethod
-    def attack_with_record(api: BattleAPI, skill_id: str, method: Callable[..., list[str]], *args, **kwargs) -> list[str]:
-        # 执行攻击
-        textlog = method(*args, **kwargs)
-
-        # 分析伤害
-        damage_info = []
-        for log in textlog:
-            if (res := BattleAPI.parse_damage(log)) is not None:
-                if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(api.get_monsters()) if monster.name == res.monster_name), None)) is not None:
-                    monster_id, monster_index = monster_info
-                    damage_info.append((monster_index, monster_id, int(res.damage)))
-
-        # 没有造成任何伤害时跳过数据库更新
-        if not damage_info:
-            return textlog
-        monster_indices, _, damage_list = zip(*damage_info)
-
-        # 更新技能数据（伤害和范围）
-        skill_data = all_skill_data.setdefault(skill_id, copy.deepcopy(SKILL_TEMPLATE))
-        EMA.update(skill_data["damage"], sum(damage_list) / len(damage_list))
-        target_monster_idx = args[-1] - BattleAPI.MONSTER_START_ID
-        skill_data["attack_range"] = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data["attack_range"])
-
-        # 更新怪兽数据，用技能基础伤害的倍数表示
-        skill_base_damage = EMA.predict(skill_data["damage"])
-        for _, monster_id, damage in damage_info:
-            EMA.update(all_monster_data.setdefault(skill_id, {}).setdefault(str(monster_id), copy.deepcopy(MONSTER_TEMPLATE))["relative_damage"], damage / skill_base_damage)
-
-        return textlog
-
-    @staticmethod
-    def predict_damage(skill_id: str, monster: Monster) -> float:
-        # 获取技能伤害
-        if skill_id not in all_skill_data:
-            return DEFAULT_MAGIC_DAMAGE if skill_id.startswith("Magic/") else DEFAULT_PHYSICS_DAMAGE
-        skill_base_damage = EMA.predict(all_skill_data[skill_id]["damage"])
-
-        # 获取技能对怪兽的伤害
-        if skill_id not in all_monster_data:
-            return skill_base_damage
-        if str(monster.monster_id) not in (skill_data := all_monster_data[skill_id]):
-            return skill_base_damage
-        multiplier = EMA.predict(skill_data[str(monster.monster_id)]["relative_damage"])
-        return skill_base_damage * multiplier
-
-    @staticmethod
-    def predict_attack_range(skill_id: str) -> int:
-        if skill_id not in all_skill_data:
-            return 0
-        return all_skill_data[skill_id]["attack_range"]
-
-    @staticmethod
-    def try_to_use(api: BattleAPI, category: Literal["magic", "item"], name: str, *args, **kwargs) -> list[str] | None:
-        if thing := next((thing for thing in getattr(api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
-            return getattr(api, f"use_{category}")(thing, *args, **kwargs)
-
-    @staticmethod
-    def control_monster(api: BattleAPI, monster_idx: int, with_sleep: bool):
-        control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
-        if with_sleep:
-            control_magic_and_effect.insert(0, ("Sleep", "Asleep"))
-
-        # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
-        best_effect = control_magic_and_effect[0][1]
-        monster = api.get_monsters()[monster_idx]
-        if any(effect.name == best_effect for effect in monster.effects):
-            return
-
-        # 按顺序施展控制效果
-        for magic_name, effect_name in control_magic_and_effect:
-            # 怪兽已经有这个 Debuff 就不用叠了，叠下一个
-            if any(effect.name == effect_name for effect in monster.effects):
-                continue
-            # 给怪兽叠其他 Debuff
-            if BattleTool.try_to_use(api, "magic", magic_name, BattleAPI.MONSTER_START_ID + monster_idx):
-                return
-
-    @staticmethod
-    def imperil_monster(api: BattleAPI, monster_idx: int):
-        # 如果已经存在对应效果，就跳过
-        if any(effect.name == "Imperiled" for effect in api.get_monsters()[monster_idx].effects):
-            return
-        # 降低怪兽的物理、魔法和元素的减伤
-        BattleTool.try_to_use(api, "magic", "Imperil", BattleAPI.MONSTER_START_ID + monster_idx)
-
-
 def battle():
-    api = BattleAPI(config["ipb_member_id"], config["ipb_pass_hash"], config["user_agent"])
+    # 加载战斗数据和配置文件
+    all_skill_data, all_monster_data, config = [json.loads(pathlib.Path(f"{name}.json").read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
+    all_skill_data, all_monster_data = [{k: data_class.model_validate(v) for k, v in data.items()} for data, data_class in [(all_skill_data, SkillData), (all_monster_data, MonsterData)]]
+
+    # 创建 API
+    authentication_config = AuthenticationConfig.model_validate(config["authentication"])
+    api = BattleAPI(authentication_config.ipb_member_id, authentication_config.ipb_pass_hash, authentication_config.user_agent)
 
     # 打印初始日志
     print("= - " * 20)
     BattleAPIHook.display_situation_after_action(api, api.logs[0])
 
-    # 使每次 do_action 都实时显示 log，而不是循环最后才显示
+    # 使每次 do_action 都实时显示 log
     api.add_post_action_hook(BattleAPIHook.display_situation_after_action)
 
-    # 检测是否需要结束前回血、是否需要叠 Buff
-    # 如果分析当前回合数和总回合数没有结果，说明战斗只持续一个回合
-    heal_before_end_flag = keep_buff = False
-    if (result := re.search(r"Round (\d+) / (\d+)", api.logs[0][0])) is not None:
-        current_rounds, total_rounds = [int(x) for x in result.groups()]
-        if current_rounds < total_rounds:
-            heal_before_end_flag = True
-        if total_rounds > 5:
-            keep_buff = True
-    if sum(monster.health for monster in api.get_monsters()) > 30000:
-        keep_buff = True
+    # 创建 Battle Bot
+    battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
+    battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
 
+    # 使用 Battle Bot 预测并执行动作
     while any(monster.health > 0 for monster in api.get_monsters()):
-        # 保持 Buff
-        if keep_buff:
-            for item_name, effect_name in [("Health Draught", "Regeneration"), ("Mana Draught", "Replenishment")]:
-                if not any(effect.name == effect_name for effect in api.get_player_effects()):
-                    BattleTool.try_to_use(api, "item", item_name)
+        # 决定动作
+        actions = battle_bot.decide()
+        best_action, best_score = max(actions, key=lambda x: x[1])
+        action, score = best_action, best_score
 
-        # 保命
-        if api.get_player_health() < ICU_HEALTH_THRESHOLD:
-            for item_name in ["Health Gem", "Health Potion"]:
-                if BattleTool.try_to_use(api, "item", item_name):
-                    break
-            else:
-                BattleTool.try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID)
-        elif api.get_player_health() < DOCTOR_HEALTH_THRESHOLD:
-            BattleTool.try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID)
+        # 仅在多个可用动作时打印信息
+        if len(actions) > 1 and random.random() < battle_bot_config.epsilon:
+            action, score = random.choice(actions)
+            print(f"[battle_bot.battle] [随机探索]\n\t随机选择动作: {action}（分数: {score}）\n\t最佳动作: {best_action}（分数: {best_score}）")
 
-        # 回蓝
-        if api.get_player_mana() < MANA_RESTORE_THRESHOLD:
-            for item_name in ["Mana Gem", "Mana Potion"]:
-                if BattleTool.try_to_use(api, "item", item_name):
-                    break
+        # 执行动作
+        battle_bot.execute_action(action)
 
-        # 扔掉（使用）没用物品
-        for item_name in ["Mystic Gem", "Spirit Gem"]:
-            if BattleTool.try_to_use(api, "item", item_name):
-                break
-
-        # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
-        monster_health = [(idx, monster.health) for idx, monster in enumerate(api.get_monsters()) if monster.health > 0]
-        if len(monster_health) == 1:
-            monster_idx, health = monster_health[0]
-            if heal_before_end_flag and (api.get_player_health() < EXPECT_HEALTH_BEFORE_END or api.get_player_mana() < EXPECT_MANA_BEFORE_END):
-                # 给敌人打麻药
-                BattleTool.control_monster(api, monster_idx, True)
-                # 救人
-                if api.get_player_health() < EXPECT_HEALTH_BEFORE_END:
-                    if not BattleTool.try_to_use(api, "magic", "Cure", BattleAPI.PLAYER_ID):
-                        for item_name in ["Health Gem", "Health Potion"]:
-                            BattleTool.try_to_use(api, "item", item_name)
-                            break
-                # 回蓝
-                if api.get_player_mana() < EXPECT_MANA_BEFORE_END:
-                    for item_name in ["Mana Gem", "Mana Potion"]:
-                        if BattleTool.try_to_use(api, "item", item_name):
-                            break
-                    else:
-                        api.do_defend()
-                continue
-
-            # 如果只有一个怪，而且血量很低，普通攻击
-            if health < BattleTool.predict_damage("Attack/Attack", api.get_monsters()[monster_idx]):
-                BattleTool.attack_with_record(api, "Attack/Attack", api.do_attack, BattleAPI.MONSTER_START_ID + monster_idx)
-                continue
-
-        # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
-        bosses = [monster_idx for monster_idx, monster in enumerate(api.get_monsters()) if monster.health > BOSS_HELATH_THRESHOLD]
-        if len(bosses) == sum(monster.health > 0 for monster in api.get_monsters()):
-            for monster_idx in bosses:
-                # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
-                BattleTool.control_monster(api, monster_idx, False)
-
-            # 如果所有怪兽都被叠了控制 Debuff，那么就给他们叠破防 Debuff
-            if all(any(effect.name == "Silenced" for effect in api.get_monsters()[monster_idx].effects) for monster_idx in bosses):
-                for monster_idx in bosses:
-                    BattleTool.imperil_monster(api, monster_idx)
-
-        # 攻击死最多的、伤害最多的、打中最多的
-        target_score = []
-        for attack_magic in api.get_player_magics():
-            if attack_magic.category != "magic_damage" or not attack_magic.available:
-                continue
-            for monster_idx in range(len(api.get_monsters())):
-                # Stop beating dead ponies
-                if api.get_monsters()[monster_idx].health == 0:
-                    continue
-                # Python 切片允许上界超过列表长度
-                skill_id = f"Magic/{attack_magic.name}"
-                attack_range = BattleTool.predict_attack_range(skill_id)
-                window = api.get_monsters()[max(monster_idx - attack_range, 0):monster_idx + attack_range + 1]
-                # 从历史数据预测伤害，计算指标
-                damage = BattleTool.predict_damage(skill_id, api.get_monsters()[monster_idx])
-                hit_number = len(window)
-                will_die = sum(monster.health < damage for monster in window)
-                damage_sum = sum(min(damage, monster.health) for monster in window)
-                damage_per_mana = damage_sum / attack_magic.mana_cost
-                # 添加进候选人名单
-                target_score.append(((attack_magic, monster_idx), (will_die, damage_sum, hit_number, damage_per_mana)))
-
-        # 选择魔法和目标
-        (best_magic, best_target), _ = max(target_score, key=lambda x: x[1])
-        if random.random() < EPSILON:
-            (best_magic, _), _ = random.choice(target_score)
-
-        # 执行攻击
-        BattleTool.attack_with_record(api, f"Magic/{best_magic.name}", api.use_magic, best_magic, BattleAPI.MONSTER_START_ID + best_target)
-
-    # 战斗结束时保存战斗数据
-    SKILL_DATA_FILE.write_text(json.dumps(all_skill_data, indent="\t"), encoding="utf-8")
-    MONSTER_DATA_FILE.write_text(json.dumps(all_monster_data, indent="\t"), encoding="utf-8")
+    # 保存战斗数据
+    for data, prefix, indent, separators in [(all_skill_data, "skill", "\t", None), (all_monster_data, "monster", None, (",", ":"))]:
+        pathlib.Path(f"{prefix}_data.json").write_text(json.dumps({k: v.model_dump() for k, v in data.items()}, indent=indent, separators=separators), encoding="utf-8")
 
 
 if __name__ == "__main__":
-    while True:
-        battle()
+    battle()

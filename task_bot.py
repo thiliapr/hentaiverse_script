@@ -17,24 +17,23 @@ config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
 request_kwargs = {"cookies": {"ipb_member_id": config["ipb_member_id"], "ipb_pass_hash": config["ipb_pass_hash"]}, "headers": {"User-Agent": config["user_agent"]}}
 
 
-def attribute_point_allocation() -> str | None:
+def attribute_point_allocation() -> list[str]:
     resp = request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=ch", **request_kwargs)
     soup = BeautifulSoup(resp.text, "lxml")
 
-    # 获取空余点数、Intelligence 加点要求经验、Wisdom 加点要求经验
-    remaining_exp, int_exp, wis_exp = [int(soup.find(id=label_id).text.replace(",", "")) for label_id in ["remaining_exp", "int_left", "wis_left"]]
-
-    # 优先加点 Wisdom，尽量保持均衡
-    int_delta = wis_delta = 0
-    if wis_exp > int_exp and remaining_exp >= int_exp:
-        int_delta = 1
-    elif remaining_exp >= wis_exp:
-        wis_delta = 1
+    # 给 Endurance（增加最大血量、物理减伤、魔法减伤）、Intelligence（增加伤害）、Wisdom（增加最大蓝量、蓝量恢复） 加点
+    # https://ehwiki.org/wiki/Character_Stats#Primary_Attributes
+    remaining_exp = int(soup.find(id="remaining_exp").text.replace(",", ""))
+    attr_delta = {attr: 0 for attr in ["str", "dex", "agi", "end", "int", "wis"]}
+    for attr in ["end", "int", "wis"]:
+        if (required_exp := int(soup.find(id=f"{attr}_left").text.replace(",", ""))) <= remaining_exp:
+            attr_delta[attr] = 1
+            remaining_exp -= required_exp
     
     # 发送请求
-    if int_delta or wis_delta:
-        request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=ch", data={"attr_apply": "1"} | {f"{attr}_delta": "0" for attr in ["str", "dex", "agi", "end"]} | {"int_delta": int_delta, "wis_delta": wis_delta}, **request_kwargs)
-        return "Intelligence" if int_delta else "Wisdom"
+    if any(v > 0 for v in attr_delta.values()):
+        request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=ch", data={"attr_apply": "1"} | {f"{attr}_delta": str(delta) for attr, delta in attr_delta.items()}, **request_kwargs)
+    return [k for k, v in attr_delta.items() if v > 0]
 
 
 def settings(difficult_level: str):
@@ -148,7 +147,7 @@ def main():
         print("检测战斗事件 ...")
         # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
         if battle_func := encounter(encounter_cookies):
-            event, difficult_level = "随机遇敌事件", "2"
+            event, difficult_level = "随机遇敌事件", "3"
         # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
         elif battle_func := arena():
             event, difficult_level = "Arena 战斗", "1"
@@ -171,14 +170,14 @@ def main():
             try:
                 while True:
                     battle_with_skip_riddle()
-            except TokenNotFoundError:
+            except (TokenNotFoundError, TypeError):
                 # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
                 pass
 
             # 战后尝试加点
             print("正在尝试加点 ...")
             if attr := attribute_point_allocation():
-                print(f"已为属性 {attr} 加了一点！")
+                print(f"已为属性 {', '.join(attr)} 加了一点！")
         else:
             print("没有发现战斗事件，等待一会继续 ...")
             # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"
