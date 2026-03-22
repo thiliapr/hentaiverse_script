@@ -152,10 +152,10 @@ def main():
         battle_func = None
         if battle_func := encounter(encounter_cookies):
             # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
-            event, difficult_level = "随机遇敌事件", "4"
+            event_type, difficult_level = "随机遇敌事件", "4"
         elif battle_func := arena():
             # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
-            event, difficult_level = "Arena 战斗", "1"
+            event_type, difficult_level = "Arena 战斗", "1"
 
         if battle_func:
             # 战斗前准备事项
@@ -169,17 +169,26 @@ def main():
                 print(f"已为属性 {', '.join(attr)} 加了一点！")
 
             # 打印当前战斗事件，并设置难度
-            print(f"正在进行 {event} ...")
+            print(f"正在进行 {event_type} ...")
             settings(difficult_level)
             print(f"开始战斗 ...")
             battle_func()
 
             try:
                 while True:
-                    battle_with_skip_riddle()
-            except (TokenNotFoundError, TypeError):
+                    result = battle_with_skip_riddle()
+            except TokenNotFoundError:
                 # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
                 pass
+
+            # 统计信息，记录
+            stats_file = pathlib.Path("stats_data.json")
+            stats = {}
+            if stats_file:
+                stats = json.loads(stats_file.read_text())
+            event_stats = stats.setdefault(event_type, {})
+            event_stats[result.name] = event_stats.get(result.name, 0) + 1
+            stats_file.write_text(json.dumps(stats))
         else:
             print("没有发现战斗事件，等待一会继续 ...")
             # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"

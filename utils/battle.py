@@ -138,7 +138,7 @@ class BattleAPI:
             self.logs.append(textlog)
 
             # 更新怪兽信息
-            self.__update_monster_helath(textlog)
+            self.__update_monster_health(textlog)
             self.__update_monster_info()
 
             # 更新战斗结果
@@ -160,7 +160,7 @@ class BattleAPI:
             if (label := self.__containers["pane_vitals"].find(id=f"{prefix}{label_id}")):
                 return int(label.text)
 
-    def __update_monster_helath(self, textlog: list[str]):
+    def __update_monster_health(self, textlog: list[str]):
         # 解析怪兽受到的伤害，并相应地更新怪兽的生命值
         # 你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.monsters)}
