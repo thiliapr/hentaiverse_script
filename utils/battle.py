@@ -193,7 +193,7 @@ class BattleAPI:
                 monster.health = 0
 
             # 怪兽也有 Buff
-            monster.effects = [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
+            monster.effects = [BattleAPI.__parse_effect(effect_element.attrs["onmouseover"]) for effect_element in monster_element.find(class_="btm6").find_all("img")]
 
     def __refresh_page_and_parse(self) -> tuple[str, dict[str, Tag], list[str]]:
         # 获取战斗界面
@@ -213,7 +213,7 @@ class BattleAPI:
         return battle_token, containers, logs
 
     @staticmethod
-    def parse_effect(effect_str: str) -> Effect:
+    def __parse_effect(effect_str: str) -> Effect:
         name, description, remaining_turns = re.search(r"battle\.set_infopane_effect\('([^']+)',\s*'([^']+)',\s*(\d+)\)", effect_str).groups()
         return Effect(name=name, description=description, remaining_turns=remaining_turns)
 
@@ -249,7 +249,7 @@ class BattleAPI:
         return self.__get_player_vital("vrs")
 
     def get_player_effects(self) -> list[Effect]:
-        return [BattleAPI.parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__containers["pane_effects"].find_all("img")]
+        return [BattleAPI.__parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__containers["pane_effects"].find_all("img")]
 
     def get_player_magics(self) -> list[Magic]:
         current_category: str
