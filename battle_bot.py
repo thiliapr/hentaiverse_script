@@ -372,4 +372,5 @@ def battle():
 
 
 if __name__ == "__main__":
-    battle()
+    while True:
+        battle()
