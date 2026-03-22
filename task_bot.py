@@ -21,15 +21,19 @@ def attribute_point_allocation() -> list[str]:
     resp = request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=ch", **request_kwargs)
     soup = BeautifulSoup(resp.text, "lxml")
 
-    # 给 Endurance（增加最大血量、物理减伤、魔法减伤）、Intelligence（增加伤害）、Wisdom（增加最大蓝量、蓝量恢复） 加点
-    # https://ehwiki.org/wiki/Character_Stats#Primary_Attributes
+    # 获取剩余 EXP 和属性加点所需 EXP
+    attributes = ["str", "dex", "agi", "end", "int", "wis"]
     remaining_exp = int(soup.find(id="remaining_exp").text.replace(",", ""))
-    attr_delta = {attr: 0 for attr in ["str", "dex", "agi", "end", "int", "wis"]}
-    for attr in ["end", "int", "wis"]:
+    required_exp = {attr: int(soup.find(id=f"{attr}_left").text.replace(",", "")) for attr in attributes}
+
+    # 给 Endurance（增加最大血量、物理减伤、魔法减伤）、Intelligence（增加伤害）、Wisdom（增加最大蓝量、蓝量恢复） 均衡加点
+    # https://ehwiki.org/wiki/Character_Stats#Primary_Attributes
+    attr_delta = {attr: 0 for attr in attributes}
+    for attr in sorted(["end", "int", "wis"], key=lambda attr: required_exp[attr]):
         if (required_exp := int(soup.find(id=f"{attr}_left").text.replace(",", ""))) <= remaining_exp:
             attr_delta[attr] = 1
             remaining_exp -= required_exp
-    
+
     # 发送请求
     if any(v > 0 for v in attr_delta.values()):
         request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=ch", data={"attr_apply": "1"} | {f"{attr}_delta": str(delta) for attr, delta in attr_delta.items()}, **request_kwargs)
