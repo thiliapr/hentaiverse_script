@@ -66,7 +66,7 @@ def repair_equipment() -> Callable[[], Any] | None:
 
 def encounter(session_cookies: dict[str, str]) -> Callable[[], Any] | None:
     # Random Encounter is a single-round battle that places players against common foes in order to get a lot credits and EXP.
-    # 请见 Wiki: https://ehwiki.org/wiki/Random_Encounter
+    # https://ehwiki.org/wiki/Random_Encounter
     cookies = request_kwargs["cookies"]
     headers = request_kwargs["headers"]
 
@@ -94,7 +94,7 @@ def encounter(session_cookies: dict[str, str]) -> Callable[[], Any] | None:
 
 def arena() -> Callable[[], Any] | None:
     # 每隔一个小时就会回复 1 点体力值，所以有体力的时候快去打 Arena 拿 Credit 吧
-    # 请见 Wiki: https://ehwiki.org/wiki/Stamina
+    # https://ehwiki.org/wiki/Stamina
     page = request_with_retry(requests.get, f"{MAIN_URL}/?s=Battle&ss=ar", **request_kwargs).text
 
     # 获取体力值并检测是否符合条件
@@ -134,9 +134,8 @@ def battle_with_skip_riddle(*args, **kwargs):
             return battle(*args, **kwargs)
         except TokenNotFoundError as e:
             if "function check_submit_button() {" in e.page:
-                # 让谜题自动过期。如果还没过期，那就再等这么多秒
-                # 我知道不选也算是错误，但是 Wiki 说不选的惩罚比乱选的惩罚小，所以就拖吧
-                # 请见 Wiki: https://ehwiki.org/wiki/RiddleMaster
+                # 让谜题自动过期。如果还没过期，那就再等这么多秒。我知道不选也算是错误，但是 Wiki 说不选的惩罚比乱选的惩罚小，所以就拖吧
+                # https://ehwiki.org/wiki/RiddleMaster
                 print("遇到小马谜题了！")
                 time.sleep(20)
                 continue
