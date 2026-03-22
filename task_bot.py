@@ -165,6 +165,10 @@ def main():
                 print("正在修复装备 ...")
                 repair_func()
 
+            print("正在尝试加点 ...")
+            if attr := attribute_point_allocation():
+                print(f"已为属性 {', '.join(attr)} 加了一点！")
+
             # 打印当前战斗事件，并设置难度
             print(f"正在进行 {event} ...")
             settings(difficult_level)
@@ -177,11 +181,6 @@ def main():
             except (TokenNotFoundError, TypeError):
                 # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
                 pass
-
-            # 战后尝试加点
-            print("正在尝试加点 ...")
-            if attr := attribute_point_allocation():
-                print(f"已为属性 {', '.join(attr)} 加了一点！")
         else:
             print("没有发现战斗事件，等待一会继续 ...")
             # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"
