@@ -6,7 +6,7 @@
 import json, pathlib, random, re
 from typing import Literal
 from pydantic import BaseModel, Field
-from utils.battle import BattleAPI, Effect, Item, Magic, Monster
+from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster
 
 
 class EWMAData(BaseModel):
@@ -101,7 +101,7 @@ class BattleBot:
                 self.heal_before_end_flag = True
             if total_rounds > self.config.draught_buff_round_threshold:
                 self.draught_buff = True
-        if any(monster.health > self.config.elite_health_threshold * 2 for monster in self.api.get_monsters()):
+        if any(monster.health > self.config.elite_health_threshold * 2 for monster in self.api.monsters):
             self.draught_buff = True
 
     @staticmethod
@@ -133,7 +133,7 @@ class BattleBot:
 
         # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
         best_effect = control_magic_and_effect[0][1]
-        monster = self.api.get_monsters()[monster_idx]
+        monster = self.api.monsters[monster_idx]
         if BattleBot.__has_effect(best_effect, monster.effects):
             return
 
@@ -162,7 +162,7 @@ class BattleBot:
         damage_info = []
         for log in textlog:
             if (res := BattleAPI.parse_damage(log)) is not None:
-                if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(self.api.get_monsters()) if monster.name == res.monster_name), None)) is not None:
+                if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(self.api.monsters) if monster.name == res.monster_name), None)) is not None:
                     monster_id, monster_index = monster_info
                     damage_info.append((monster_index, monster_id, int(res.damage)))
 
@@ -228,7 +228,7 @@ class BattleBot:
                 return [(action, 0)]
 
         # 战斗结束前策略
-        monster_health = [(idx, monster.health) for idx, monster in enumerate(self.api.get_monsters()) if monster.health > 0]
+        monster_health = [(idx, monster.health) for idx, monster in enumerate(self.api.monsters) if monster.health > 0]
         if len(monster_health) == 1:
             monster_idx, health = monster_health[0]
 
@@ -250,12 +250,12 @@ class BattleBot:
                     return [(ActionDefend(), 0)]
 
             # 如果只有一个怪，而且血量很低，普通攻击
-            if health < self.__predict_damage("Attack/Attack", self.api.get_monsters()[monster_idx]):
+            if health < self.__predict_damage("Attack/Attack", self.api.monsters[monster_idx]):
                 return [(ActionAttack(target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id="Attack/Attack"), 0)]
 
         # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
-        bosses = [(monster_idx, monster) for monster_idx, monster in enumerate(self.api.get_monsters()) if monster.health > self.config.elite_health_threshold]
-        if len(bosses) == sum(monster.health > 0 for monster in self.api.get_monsters()):
+        bosses = [(monster_idx, monster) for monster_idx, monster in enumerate(self.api.monsters) if monster.health > self.config.elite_health_threshold]
+        if len(bosses) == sum(monster.health > 0 for monster in self.api.monsters):
             for monster_idx, _ in bosses:
                 # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
                 if action := self.__control_monster(monster_idx, with_sleep=False):
@@ -274,15 +274,15 @@ class BattleBot:
         for magic in self.api.get_player_magics():
             if magic.category != "magic_damage" or not magic.available:
                 continue
-            for monster_idx in range(len(self.api.get_monsters())):
+            for monster_idx in range(len(self.api.monsters)):
                 # Stop beating dead ponies
-                if self.api.get_monsters()[monster_idx].health == 0:
+                if self.api.monsters[monster_idx].health == 0:
                     continue
 
                 # 获取攻击范围窗口
                 skill_id = f"Magic/{magic.name}"
                 attack_range = self.skill_data[skill_id].attack_range if skill_id in self.skill_data else 0
-                window = self.api.get_monsters()[max(monster_idx - attack_range, 0):monster_idx + attack_range + 1]
+                window = self.api.monsters[max(monster_idx - attack_range, 0):monster_idx + attack_range + 1]
                 window = [monster for monster in window if monster.health > 0]
 
                 # 从历史数据预测伤害，计算指标
@@ -311,7 +311,7 @@ class BattleAPIHook:
         print("\n".join(textlog))
 
         # 如果游戏尚未结束，打印玩家和场上怪兽信息
-        if all(monster.health == 0 for monster in api.get_monsters()):
+        if all(monster.health == 0 for monster in api.monsters):
             print("- - " * 20)
             return
 
@@ -327,11 +327,11 @@ class BattleAPIHook:
 
         print("+ - " * 10)
         print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={format_effects_str(api.get_player_effects())}")
-        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.get_monsters()) if monster.health))
+        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
         print("# = " * 16)
 
 
-def battle():
+def battle() -> BattleResult:
     # 加载战斗数据和配置文件
     all_skill_data, all_monster_data, config = [json.loads(pathlib.Path(f"{name}.json").read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
     all_skill_data, all_monster_data = [{k: data_class.model_validate(v) for k, v in data.items()} for data, data_class in [(all_skill_data, SkillData), (all_monster_data, MonsterData)]]
@@ -352,7 +352,7 @@ def battle():
     battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
 
     # 使用 Battle Bot 预测并执行动作
-    while any(monster.health > 0 for monster in api.get_monsters()):
+    while api.battle_result == BattleResult.IN_PROGRESS:
         # 决定动作
         actions = battle_bot.decide()
         best_action, best_score = max(actions, key=lambda x: x[1])
@@ -369,6 +369,8 @@ def battle():
     # 保存战斗数据
     for data, prefix, indent, separators in [(all_skill_data, "skill", "\t", None), (all_monster_data, "monster", None, (",", ":"))]:
         pathlib.Path(f"{prefix}_data.json").write_text(json.dumps({k: v.model_dump() for k, v in data.items()}, indent=indent, separators=separators), encoding="utf-8")
+
+    return api.battle_result
 
 
 if __name__ == "__main__":

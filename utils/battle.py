@@ -4,6 +4,7 @@
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
 import re
+import enum
 from typing import Any
 from collections.abc import Callable
 import requests
@@ -53,6 +54,13 @@ class DamageLog(BaseModel):
     attribute: str | None = Field(description="造成的是什么属性的伤害")
 
 
+class BattleResult(enum.Enum):
+    IN_PROGRESS = enum.auto()
+    VICTORY = enum.auto()
+    DEFEAT = enum.auto()
+    UNCONFIRMED = enum.auto()
+
+
 class TokenNotFoundError(Exception):
     def __init__(self, page: str):
         self.page = page
@@ -75,8 +83,11 @@ class BattleAPI:
 
         # 解析获取怪兽信息，按怪物出场的顺序排序，A 最先出场，B 第二个出场，以此类推
         monsters_info = sorted([x.groups() for x in [re.search(r"Spawned Monster ([A-Z]): MID=([0-9]+) \(([^)]+)\) LV=(\d+) HP=(\d+)", log) for log in initial_logs] if x is not None], key=lambda x: x[0])
-        self.__monsters = [Monster(name=name, monster_id=monster_id, level=level, health=health) for _, monster_id, name, level, health in monsters_info]
+        self.monsters = [Monster(name=name, monster_id=monster_id, level=level, health=health) for _, monster_id, name, level, health in monsters_info]
         self.__update_monster_info()
+
+        # 初始化战斗结果
+        self.battle_result = BattleResult.IN_PROGRESS
 
         # 初始化钩子列表
         self.__post_action_hooks = []
@@ -86,6 +97,7 @@ class BattleAPI:
         action |= {"type": "battle", "method": "action", "token": self.__battle_token}
 
         # 告诉服务器执行动作
+        textlog = []
         while True:
             # 发送动作包给服务器
             resp_json = None
@@ -100,19 +112,24 @@ class BattleAPI:
                     if container_id in resp_json:
                         self.__containers[container_id] = BeautifulSoup(resp_json[container_id], "lxml")
                 textlog = [log["t"] for log in resp_json["textlog"]]
+
             # 否则刷新页面，检测是否发送请求成功
             else:
-                self.__battle_token, self.__containers, textlog = self.__refresh_page_and_parse()
-                # 如果战斗记录没有更新，说明请求没发出去，再发一次
-                if self.logs[-1] == textlog:
-                    print(f"[BattleAPI.__do_action] 请求没有发送到服务器，再发一次 ...")
-                    continue
-                # 如果战斗记录包含 "Initializing" 而且之前存在过其他战斗记录，说明这是一个新的、不同于之前的战斗。原因是服务器的确已经收到了请求，并i企鹅这个请求终结了所有怪兽、结束了战斗，但是客户端接收这个消息时发生了网络错误，那么我们就手动将所有怪兽的生命置零吧
-                if len(self.logs) > 1 and any("Initializing" in log for log in textlog):
-                    print("[BattleAPI.__do_action] 服务器已经开启新的战斗")
-                    for monster in self.__monsters:
-                        monster.health = 0
-                    textlog = []
+                try:
+                    self.__battle_token, self.__containers, textlog = self.__refresh_page_and_parse()
+
+                    # 如果战斗记录没有更新，说明请求没发出去，再发一次
+                    if self.logs[-1] == textlog:
+                        print(f"[BattleAPI.__do_action] 请求没有发送到服务器，再发一次 ...")
+                        continue
+
+                    # 如果战斗记录包含 "Initializing" 而且之前存在过其他战斗记录，说明这是一个新的、不同于之前的战斗。原因是服务器的确已经收到了请求，并i企鹅这个请求终结了所有怪兽、结束了战斗，但是客户端接收这个消息时发生了网络错误
+                    if len(self.logs) > 1 and any("Initializing" in log for log in textlog):
+                        print("[BattleAPI.__do_action] 服务器已经开启新的战斗")
+                        self.battle_result = BattleResult.VICTORY
+                except TokenNotFoundError:
+                    # 如果没有找到 Token，说明本场战斗已经结束，但是由于未接收到服务器的响应，无法得知战斗结果
+                    self.battle_result = BattleResult.UNCONFIRMED
             break
 
         # 仅在还处于本场战斗时更新
@@ -123,6 +140,12 @@ class BattleAPI:
             # 更新怪兽信息
             self.__update_monster_helath(textlog)
             self.__update_monster_info()
+
+            # 更新战斗结果
+            if any(log == "You are Victorious!" for log in textlog):
+                self.battle_result = BattleResult.VICTORY
+            if any(log == "You have been defeated." for log in textlog):
+                self.battle_result = BattleResult.DEFEAT
 
         # 执行钩子
         for callback in self.__post_action_hooks:
@@ -140,7 +163,7 @@ class BattleAPI:
     def __update_monster_helath(self, textlog: list[str]):
         # 解析怪兽受到的伤害，并相应地更新怪兽的生命值
         # 你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
-        monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.get_monsters())}
+        monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.monsters)}
         for log in textlog:
             monster_name = None
             # Persistent 伤害日志格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
@@ -150,12 +173,12 @@ class BattleAPI:
 
             # 更新怪兽生命值
             if monster_name in monster_name_to_idx:
-                monster = self.__monsters[monster_name_to_idx[monster_name]]
+                monster = self.monsters[monster_name_to_idx[monster_name]]
                 monster.health = int(max(monster.health - damage, 0))
 
     def __update_monster_info(self):
         # 每次获取的时候，先更新一下状态
-        for monster, monster_element in zip(self.__monsters, self.__containers["pane_monster"].find_all(class_="btm1")):
+        for monster, monster_element in zip(self.monsters, self.__containers["pane_monster"].find_all(class_="btm1")):
             # 注意: 血量、蓝量、Spirit 量条显示的都是比例缩放的值，比如满了就是 120px，一半就是 60px，非常不靠谱
             for attr, alt in [("mana", "magic"), ("spirit", "spirit")]:
                 result = monster_element.find(alt=alt)
@@ -211,9 +234,6 @@ class BattleAPI:
 
     def do_attack(self, target: int) -> list[str]:
         return self.__do_action({"mode": "attack", "target": target, "skill": 0})
-
-    def get_monsters(self) -> list[Monster]:
-        return self.__monsters
 
     def get_player_health(self) -> int:
         # 在 Standard UI 下，血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
