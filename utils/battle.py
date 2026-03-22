@@ -208,7 +208,7 @@ class BattleAPI:
         soup = BeautifulSoup(page, "lxml")
         containers = {container_id: soup.find(id=container_id) for container_id in self.__containers}
 
-        # 获取最新战斗记录。网页里为了方便查看最新信息，记录是从新到旧排序的，也就是旧的在上边、新的在下边。我们得反转回来
+        # 获取最新战斗记录。网页里为了方便查看最新信息，记录是从新到旧排序的，也就是新的在上边、旧的在下边。我们得反转回来
         logs = [x.text for x in reversed(soup.find(id="textlog").find_all("tr"))]
         return battle_token, containers, logs
 
