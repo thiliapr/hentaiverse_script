@@ -158,25 +158,30 @@ def main():
             event_type, difficult_level = "Arena 战斗", "1"
 
         if battle_func:
+            print(f"正在为 {event_type} 做准备 ...")
+
             # 战斗前准备事项
-            print("检测装备损坏 ...")
+            print("- 检测装备损坏 ...")
             if repair_func := repair_equipment():
-                print("正在修复装备 ...")
+                print("  - 正在修复装备 ...")
                 repair_func()
 
-            print("正在尝试加点 ...")
+            print("- 尝试加点 ...")
             if attr := attribute_point_allocation():
-                print(f"已为属性 {', '.join(attr)} 加了一点！")
+                print(f"  - 已为属性 {', '.join(attr)} 加了一点！")
 
             # 打印当前战斗事件，并设置难度
-            print(f"正在进行 {event_type} ...")
+            print(f"- 设置难度等级为 {difficult_level} ...")
             settings(difficult_level)
-            print(f"开始战斗 ...")
+            print(f"- 开始战斗 ...")
             battle_func()
 
             try:
                 while True:
-                    result = battle_with_skip_riddle()
+                    # result = battle_with_skip_riddle()
+                    from utils.battle import BattleResult
+                    result = BattleResult.VICTORY
+                    raise TokenNotFoundError("")
             except TokenNotFoundError:
                 # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
                 pass
@@ -184,7 +189,7 @@ def main():
             # 统计信息，记录
             stats_file = pathlib.Path("stats_data.json")
             stats = {}
-            if stats_file:
+            if stats_file.exists():
                 stats = json.loads(stats_file.read_text())
             event_stats = stats.setdefault(event_type, {})
             event_stats[result.name] = event_stats.get(result.name, 0) + 1
