@@ -149,14 +149,13 @@ def main():
 
     while True:
         print("检测战斗事件 ...")
-        # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
+        battle_func = None
         if battle_func := encounter(encounter_cookies):
+            # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
             event, difficult_level = "随机遇敌事件", "4"
-        # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
         elif battle_func := arena():
+            # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
             event, difficult_level = "Arena 战斗", "1"
-        else:
-            battle_func = None
 
         if battle_func:
             # 战斗前准备事项
