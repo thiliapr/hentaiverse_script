@@ -177,10 +177,7 @@ def main():
 
             try:
                 while True:
-                    # result = battle_with_skip_riddle()
-                    from utils.battle import BattleResult
-                    result = BattleResult.VICTORY
-                    raise TokenNotFoundError("")
+                    result = battle_with_skip_riddle()
             except TokenNotFoundError:
                 # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
                 pass
