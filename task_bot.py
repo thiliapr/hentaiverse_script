@@ -189,7 +189,7 @@ def main():
                 stats = json.loads(stats_file.read_text())
             event_stats = stats.setdefault(event_type, {})
             event_stats[result.name] = event_stats.get(result.name, 0) + 1
-            stats_file.write_text(json.dumps(stats))
+            stats_file.write_text(json.dumps(stats, ensure_ascii=False))
         else:
             print("没有发现战斗事件，等待一会继续 ...")
             # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"
