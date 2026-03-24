@@ -123,8 +123,8 @@ class BattleAPI:
                         print(f"[BattleAPI.__do_action] 请求没有发送到服务器，再发一次 ...")
                         continue
 
-                    # 如果战斗记录包含 "Initializing" 而且之前存在过其他战斗记录，说明这是一个新的、不同于之前的战斗。原因是服务器的确已经收到了请求，并i企鹅这个请求终结了所有怪兽、结束了战斗，但是客户端接收这个消息时发生了网络错误
-                    if len(self.logs) > 1 and any("Initializing" in log for log in textlog):
+                    # 如果战斗记录包含 "Initializing" ，并且与本局的记录不同，说明这是一个新的、不同于之前的战斗。原因是服务器的确已经收到了请求，并i企鹅这个请求终结了所有怪兽、结束了战斗，但是客户端接收这个消息时发生了网络错误
+                    if textlog and "Initializing" in textlog[0] and self.logs[0] != textlog:
                         print("[BattleAPI.__do_action] 服务器已经开启新的战斗")
                         self.battle_result = BattleResult.VICTORY
                 except TokenNotFoundError:
