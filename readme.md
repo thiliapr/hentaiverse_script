@@ -16,7 +16,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
 ## 怎么使用这个项目里的脚本
 ### 项目里脚本的介绍
 - `battle_bot.py`: 自动打怪脚本，封装了一些战斗逻辑，适用于战斗时，但请确保开启前你没有碰过战斗，否则请打到下一场战斗
-- `task_bot.py`: 根据`battle_bot.py`写的自动做任务脚本，包括检测体力值并进行[Arena](https://ehwiki.org/wiki/Arena)战斗、浏览[E-Hentai Gallery](https://ehwiki.org/wiki/Galleries)并进行[随机遇敌事件](https://ehwiki.org/wiki/Random_Encounter)，并简单地忽略[小马谜题](https://ehwiki.org/wiki/RiddleMaster)（注意，小马谜题错误率过高会导致体力消耗过快，请慎重使用）
+- `task_bot.py`: 根据`battle_bot.py`写的自动做任务脚本，包括检测体力值并进行[Arena](https://ehwiki.org/wiki/Arena)战斗、浏览[E-Hentai Gallery](https://ehwiki.org/wiki/Galleries)并进行[随机遇敌事件](https://ehwiki.org/wiki/Random_Encounter)、修复装备（请确保材料足够，你可以通过事先在 [Market](https://hentaiverse.org/?s=Bazaar&ss=mk&screen=browseitems&filter=ma) 买够）、属性加点、贩卖无用物品（在配置指定不想贩卖的过滤器和物品），并简单地忽略[小马谜题](https://ehwiki.org/wiki/RiddleMaster)（注意，小马谜题错误率过高会导致体力消耗过快，请慎重使用）
 
 ### 快速使用
 1. 填写`config.json`并保存，示例如下（`ipb_member_id`和`ipb_pass_hash`获取方法请见[前作的介绍](https://github.com/thiliapr/hentaiverse_battle_bot/?tab=readme-ov-file#%E6%B5%81%E7%A8%8B)）
@@ -36,6 +36,12 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "pre_battle_mana_reserve": 20,
            "draught_buff_round_threshold": 5,
            "epsilon": 0.3
+       },
+       "task_bot": {
+           "market_bot": {
+               "wanted_items": ["Health Draught", "Health Potion", "Mana Draught", "Mana Potion"],
+               "skipped_filters": ["Materials", "Trophies"]
+           }
        }
    }
    ```
