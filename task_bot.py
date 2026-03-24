@@ -193,54 +193,55 @@ def main():
         battle_func = None
         if battle_func := encounter(encounter_cookies):
             # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
-            event_type, difficult_level = "随机遇敌事件", "4"
+            event_type, difficult_level, epsilon = "随机遇敌事件", "4", None
         elif battle_func := arena():
             # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
-            event_type, difficult_level = "Arena 战斗", "1"
+            event_type, difficult_level, epsilon = "Arena 战斗", "1", 0.
 
-        if battle_func:
-            # 战斗前准备事项
-            print(f"[TaskBot] [{event_type}] [RepairEquipment] 检测装备损坏 ...")
-            if repair_func := repair_equipment():
-                print(f"[TaskBot] [{event_type}] [RepairEquipment] 正在修复装备 ...")
-                repair_func()
-
-            print(f"[TaskBot] [{event_type}] [AllocateAttribute] 尝试加点 ...")
-            if attr := attribute_point_allocation():
-                print(f"[TaskBot] [{event_type}] [AllocateAttribute] 已为属性 {', '.join(attr)} 加了一点！")
-
-            # 打印当前战斗事件，并设置难度
-            print(f"[TaskBot] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {difficult_level} ...")
-            settings(difficult_level)
-            print(f"[TaskBot] [{event_type}] [Battle] 开始战斗 ...")
-            battle_func()
-
-            try:
-                while True:
-                    result = battle_with_skip_riddle()
-            except TokenNotFoundError:
-                # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
-                pass
-
-            # 战后变卖不需要的东西
-            print(f"[TaskBot] [{event_type}] 变卖物品 ...")
-            credits_earned, items_sold = market_bot()
-            if credits_earned:
-                print(f"赚取了 {credits_earned} Credits。变卖了的物品: {items_sold}")
-
-            # 统计信息，记录
-            stats_file = pathlib.Path("stats_data.json")
-            stats = {}
-            if stats_file.exists():
-                stats = json.loads(stats_file.read_text("utf-8"))
-            event_stats = stats.setdefault(event_type, {})
-            event_stats[result.name] = event_stats.get(result.name, 0) + 1
-            stats_file.write_text(json.dumps(stats, ensure_ascii=False), "utf-8")
-        else:
+        if battle_func is None:
             print("[TaskBot] 没有发现战斗事件，等待一会继续 ...")
             # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"
             for _ in tqdm(range(random.randint(1800, 1860)), desc="Waiting"):
                 time.sleep(1)
+            continue
+
+        # 战斗前准备事项
+        print(f"[TaskBot] [{event_type}] [RepairEquipment] 检测装备损坏 ...")
+        if repair_func := repair_equipment():
+            print(f"[TaskBot] [{event_type}] [RepairEquipment] 正在修复装备 ...")
+            repair_func()
+
+        print(f"[TaskBot] [{event_type}] [AllocateAttribute] 尝试加点 ...")
+        if attr := attribute_point_allocation():
+            print(f"[TaskBot] [{event_type}] [AllocateAttribute] 已为属性 {', '.join(attr)} 加了一点！")
+
+        # 打印当前战斗事件，并设置难度
+        print(f"[TaskBot] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {difficult_level} ...")
+        settings(difficult_level)
+        print(f"[TaskBot] [{event_type}] [Battle] 开始战斗 ...")
+        battle_func()
+
+        try:
+            while True:
+                result = battle_with_skip_riddle(epsilon)
+        except TokenNotFoundError:
+            # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
+            pass
+
+        # 战后变卖不需要的东西
+        print(f"[TaskBot] [{event_type}] 变卖物品 ...")
+        credits_earned, items_sold = market_bot()
+        if credits_earned:
+            print(f"赚取了 {credits_earned} Credits。变卖了的物品: {items_sold}")
+
+        # 统计信息，记录
+        stats_file = pathlib.Path("stats_data.json")
+        stats = {}
+        if stats_file.exists():
+            stats = json.loads(stats_file.read_text("utf-8"))
+        event_stats = stats.setdefault(event_type, {})
+        event_stats[result.name] = event_stats.get(result.name, 0) + 1
+        stats_file.write_text(json.dumps(stats, ensure_ascii=False), "utf-8")
 
 
 if __name__ == "__main__":

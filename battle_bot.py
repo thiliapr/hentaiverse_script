@@ -331,7 +331,7 @@ class BattleAPIHook:
         print("# = " * 16)
 
 
-def battle() -> BattleResult:
+def battle(epsilon: float | None = None) -> BattleResult:
     # 加载战斗数据和配置文件
     all_skill_data, all_monster_data, config = [json.loads(pathlib.Path(f"{name}.json").read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
     all_skill_data, all_monster_data = [{k: data_class.model_validate(v) for k, v in data.items()} for data, data_class in [(all_skill_data, SkillData), (all_monster_data, MonsterData)]]
@@ -349,6 +349,8 @@ def battle() -> BattleResult:
 
     # 创建 Battle Bot
     battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
+    if epsilon is not None:
+        battle_bot_config.epsilon = epsilon
     battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
 
     # 使用 Battle Bot 预测并执行动作
