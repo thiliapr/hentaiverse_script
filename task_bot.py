@@ -232,10 +232,10 @@ def main():
             stats_file = pathlib.Path("stats_data.json")
             stats = {}
             if stats_file.exists():
-                stats = json.loads(stats_file.read_text())
+                stats = json.loads(stats_file.read_text("utf-8"))
             event_stats = stats.setdefault(event_type, {})
             event_stats[result.name] = event_stats.get(result.name, 0) + 1
-            stats_file.write_text(json.dumps(stats, ensure_ascii=False))
+            stats_file.write_text(json.dumps(stats, ensure_ascii=False), "utf-8")
         else:
             print("[TaskBot] 没有发现战斗事件，等待一会继续 ...")
             # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"
