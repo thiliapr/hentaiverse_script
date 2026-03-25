@@ -375,7 +375,7 @@ def battle(epsilon: float) -> BattleResult:
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--epsilon", type=float, default=0.3, help="随机探索率，越大越激进，越小越保守")
+    parser.add_argument("-e", "--epsilon", type=float, default=0., help="随机探索率，越大越激进，越小越保守")
     parser.add_argument("-l", "--loop", action="store_true", help="一直尝试进行战斗，直到找不到战斗")
     return parser.parse_args(args)
 
