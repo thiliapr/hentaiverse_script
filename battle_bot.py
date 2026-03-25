@@ -212,6 +212,9 @@ class BattleBot:
         if self.api.get_player_health() < self.config.critical_health_line:
             if action := self.__heal(magic_only=False, magic_first=False):
                 return [(action, 0)]
+            # 如果魔法又在 CD，物品也在 CD 或者用不了，实在没法回血，就用保命技能（免疫一次会致死的攻击）
+            if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
+                return [(action, 0)]
         if self.api.get_player_health() < self.config.normal_healing_line:
             if action := self.__heal(magic_only=True):
                 return [(action, 0)]
