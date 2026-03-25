@@ -3,10 +3,10 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, random, re
+import json, pathlib, random, re, argparse
 from typing import Literal
 from pydantic import BaseModel, Field
-from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster
+from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError
 
 
 class EWMAData(BaseModel):
@@ -331,7 +331,7 @@ class BattleAPIHook:
         print("# = " * 16)
 
 
-def battle(epsilon: float | None = None) -> BattleResult:
+def battle(epsilon: float) -> BattleResult:
     # 加载战斗数据和配置文件
     all_skill_data, all_monster_data, config = [json.loads(pathlib.Path(f"{name}.json").read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
     all_skill_data, all_monster_data = [{k: data_class.model_validate(v) for k, v in data.items()} for data, data_class in [(all_skill_data, SkillData), (all_monster_data, MonsterData)]]
@@ -349,8 +349,6 @@ def battle(epsilon: float | None = None) -> BattleResult:
 
     # 创建 Battle Bot
     battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
-    if epsilon is not None:
-        battle_bot_config.epsilon = epsilon
     battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
 
     # 使用 Battle Bot 预测并执行动作
@@ -361,7 +359,7 @@ def battle(epsilon: float | None = None) -> BattleResult:
         action, score = best_action, best_score
 
         # 仅在多个可用动作时打印信息
-        if len(actions) > 1 and random.random() < battle_bot_config.epsilon:
+        if len(actions) > 1 and random.random() < epsilon:
             action, score = random.choice(actions)
             print(f"[battle_bot.battle] [随机探索]\n\t随机选择动作: {action}（分数: {score}）\n\t最佳动作: {best_action}（分数: {best_score}）")
 
@@ -375,6 +373,23 @@ def battle(epsilon: float | None = None) -> BattleResult:
     return api.battle_result
 
 
+def parse_args(args: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-e", "--epsilon", type=float, default=0.3, help="随机探索率，越大越激进，越小越保守")
+    parser.add_argument("-l", "--loop", action="store_true", help="一直尝试进行战斗，直到找不到战斗")
+    return parser.parse_args(args)
+
+
+def main(args: argparse.Namespace):
+    if args.loop:
+        try:
+            while True:
+                battle(args.epsilon)
+        except TokenNotFoundError:
+            print("检测不到 battle_token，大概是没有战斗了")
+    else:
+        battle(args.epsilon)
+
+
 if __name__ == "__main__":
-    while True:
-        battle()
+    main(parse_args())
