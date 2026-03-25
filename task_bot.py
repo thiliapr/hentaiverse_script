@@ -193,10 +193,10 @@ def main():
         battle_func = None
         if battle_func := encounter(encounter_cookies):
             # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
-            event_type, difficult_level, epsilon = "随机遇敌事件", "4", None
+            event_type, difficult_level, epsilon = "随机遇敌事件", "4", 0.
         elif battle_func := arena():
             # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
-            event_type, difficult_level, epsilon = "Arena 战斗", "1", 0.
+            event_type, difficult_level, epsilon = "Arena 战斗", "1", 0.3
 
         if battle_func is None:
             print("[TaskBot] 没有发现战斗事件，等待一会继续 ...")
