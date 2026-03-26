@@ -43,7 +43,8 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            },
            "encounter_difficult_level": "3",
            "arena_difficult_level": "1",
-           "arena_epsilon": 0.3
+           "arena_epsilon": 0.3,
+           "training_henjutsu": "Adept Learner"
        }
    }
    ```
