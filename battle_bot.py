@@ -4,7 +4,7 @@
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
 import json, pathlib, random, re, argparse
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError
 
@@ -270,7 +270,7 @@ class BattleBot:
             monster_idx, health = monster_health[0]
 
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
-            if self.heal_before_end_flag and not self.__has_effect("Spark of Life", self.api.get_player_effects()) and (self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
+            if self.heal_before_end_flag and ((self.api.get_player_health() < self.config.pre_battle_health_reserve and not self.__has_effect("Spark of Life", self.api.get_player_effects())) or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
                 # 给敌人打麻药
                 if action := self.__control_monster(monster_idx, with_sleep=True):
                     return [(action, 0)]
@@ -339,7 +339,7 @@ class BattleBot:
         return [(ActionDefend(), 0)]
 
 
-def battle(epsilon: float) -> BattleResult:
+def battle(epsilon: float, config_override: dict[str, Any] | None = None) -> BattleResult:
     # 加载战斗数据和配置文件
     all_skill_data, all_monster_data, config = [json.loads(pathlib.Path(f"{name}.json").read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
     all_skill_data, all_monster_data = [{k: data_class.model_validate(v) for k, v in data.items()} for data, data_class in [(all_skill_data, SkillData), (all_monster_data, MonsterData)]]
@@ -357,6 +357,8 @@ def battle(epsilon: float) -> BattleResult:
 
     # 创建 Battle Bot
     battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
+    for k, v in config_override.items() | {}:
+        setattr(battle_bot_config, k, v)
     battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
 
     # 使用 Battle Bot 预测并执行动作

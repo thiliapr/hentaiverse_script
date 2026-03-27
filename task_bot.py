@@ -217,10 +217,10 @@ def main():
         battle_func = None
         if battle_func := encounter(encounter_cookies):
             # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
-            event_type, difficult_level, epsilon = "随机遇敌事件", config["task_bot"]["encounter_difficult_level"], 0.
+            event_type, difficult_level, epsilon, config_override = "随机遇敌事件", config["task_bot"]["encounter_difficult_level"], 0., {"spark_buff": True}
         elif battle_func := arena():
             # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
-            event_type, difficult_level, epsilon = "Arena 战斗", config["task_bot"]["arena_difficult_level"], config["task_bot"]["arena_epsilon"]
+            event_type, difficult_level, epsilon, config_override = "Arena 战斗", config["task_bot"]["arena_difficult_level"], config["task_bot"]["arena_epsilon"], {"spark_buff": False}
 
         if battle_func is None:
             print("[TaskBot] 没有发现战斗事件，等待一会继续 ...")
@@ -247,7 +247,7 @@ def main():
 
         try:
             while True:
-                battle_result = battle_with_skip_riddle(epsilon)
+                battle_result = battle_with_skip_riddle(epsilon, config_override)
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
