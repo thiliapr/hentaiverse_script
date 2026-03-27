@@ -199,7 +199,8 @@ def battle_with_skip_riddle(*args, **kwargs):
             return battle(*args, **kwargs)
         except TokenNotFoundError as e:
             if "function check_submit_button() {" in e.page:
-                # 让谜题自动过期。如果还没过期，那就再等这么多秒。我知道拖着不选也算是错误，但是 Wiki 说不选的惩罚比乱选的惩罚小，所以就拖吧
+                # 如果遇到小马谜题，我们无法跳过，只能作答，或者等待谜题过期。Wiki 里说多选择一个错误的小马，比少选一个正确的小马的惩罚要大。谜题过期，也就是选择缺省值——谁都不选
+                # Selecting a pony that is not in the picture will count more severe towards a penalty than missing one pony - so when in doubt, best not to guess but leave one blank
                 # https://ehwiki.org/wiki/RiddleMaster
                 print("遇到小马谜题了！")
                 time.sleep(20)
@@ -257,7 +258,8 @@ def main():
         if credits_earned:
             print(f"赚取了 {credits_earned} Credits。变卖了的物品: {items_sold}")
 
-        # 训练 Henjutsu
+        # 训练 Henjutsu（游戏的技能，要花 Credit 和时间训练，可以增加爆率、EXP 倍数等。游戏有 15 个 Hentsuju 可供训练）
+        # https://ehwiki.org/wiki/Training
         target_henjutsu = config["task_bot"]["training_henjutsu"]
         if target_henjutsu:
             print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu: {target_henjutsu}")
