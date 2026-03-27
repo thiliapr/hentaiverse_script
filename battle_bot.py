@@ -182,6 +182,39 @@ class BattleBot:
 
         return textlog
 
+    @staticmethod
+    def display_situation_after_action(api: BattleAPI, textlog: list[str]):
+        def format_effects_str(effects: list[Effect]) -> str:
+            effect_strings = []
+            for effect in effects:
+                effect_str = f"{effect.name}({effect.remaining_turns} Turn"
+                if effect.remaining_turns > 1:
+                    effect_str += "s"
+                effect_str += ")"
+                effect_strings.append(effect_str)
+            return ", ".join(effect_strings)
+
+        # 只在有日志的时候打印战斗记录
+        if not textlog:
+            return
+        print("\n".join(textlog))
+
+        # 如果游戏尚未结束，打印玩家和场上怪兽信息
+        if all(monster.health == 0 for monster in api.monsters):
+            print("- - " * 20)
+            return
+
+        # 获取玩家血量（当持有 Spark of Life Buff 时，游戏不会显示血量）
+        player_health = api.get_player_health()
+        if BattleBot.__has_effect("Spark of Life", api.get_player_effects()):
+            player_health = "Unknown"
+
+        # 打印现场情况
+        print("+ - " * 10)
+        print(f"Player: Health={player_health}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects_str(api.get_player_effects())}")
+        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
+        print("# = " * 16)
+
     def execute_action(self, action: BaseAction) -> list[str]:
         # 执行动作，获得战斗记录
         if action.action_type == "attack":
@@ -221,8 +254,8 @@ class BattleBot:
                 if action := self.__heal(magic_only=True):
                     return [(action, 0)]
 
-        # 上保命 Buff。注意，Spark of Life 会隐藏实际生命值，导致 API 无法获取实际生命，显示只有 1 点生命值，这不是实际情况
-        if self.config.spark_buff and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+        # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff。注意，Spark of Life 会隐藏实际生命值，导致 API 无法获取实际生命，显示只有 1 点生命值，这不是实际情况
+        if self.config.spark_buff and self.api.get_player_spirit() > 1 and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
             if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
                 return [(action, 0)]
 
@@ -237,12 +270,12 @@ class BattleBot:
             monster_idx, health = monster_health[0]
 
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
-            if self.heal_before_end_flag and (self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
+            if self.heal_before_end_flag and not self.__has_effect("Spark of Life", self.api.get_player_effects()) and (self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
                 # 给敌人打麻药
                 if action := self.__control_monster(monster_idx, with_sleep=True):
                     return [(action, 0)]
 
-                # 尝试回血到期望值 
+                # 尝试回血到期望值
                 if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(magic_only=False)):
                     return [(action, 0)]
 
@@ -306,35 +339,6 @@ class BattleBot:
         return [(ActionDefend(), 0)]
 
 
-class BattleAPIHook:
-    @staticmethod
-    def display_situation_after_action(api: BattleAPI, textlog: list[str]):
-        # 只在有日志的时候打印战斗记录
-        if not textlog:
-            return
-        print("\n".join(textlog))
-
-        # 如果游戏尚未结束，打印玩家和场上怪兽信息
-        if all(monster.health == 0 for monster in api.monsters):
-            print("- - " * 20)
-            return
-
-        def format_effects_str(effects: list[Effect]) -> str:
-            effect_strings = []
-            for effect in effects:
-                effect_str = f"{effect.name}({effect.remaining_turns} Turn"
-                if effect.remaining_turns > 1:
-                    effect_str += "s"
-                effect_str += ")"
-                effect_strings.append(effect_str)
-            return ", ".join(effect_strings)
-
-        print("+ - " * 10)
-        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Effects={format_effects_str(api.get_player_effects())}")
-        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
-        print("# = " * 16)
-
-
 def battle(epsilon: float) -> BattleResult:
     # 加载战斗数据和配置文件
     all_skill_data, all_monster_data, config = [json.loads(pathlib.Path(f"{name}.json").read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
@@ -346,10 +350,10 @@ def battle(epsilon: float) -> BattleResult:
 
     # 打印初始日志
     print("= - " * 20)
-    BattleAPIHook.display_situation_after_action(api, api.logs[0])
+    BattleBot.display_situation_after_action(api, api.logs[0])
 
     # 使每次 do_action 都实时显示 log
-    api.add_post_action_hook(BattleAPIHook.display_situation_after_action)
+    api.add_post_action_hook(BattleBot.display_situation_after_action)
 
     # 创建 Battle Bot
     battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
