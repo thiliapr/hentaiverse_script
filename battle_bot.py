@@ -34,15 +34,15 @@ class MonsterData(BaseModel):
 
 
 class BattleBotConfig(BaseModel):
-    elite_health_threshold: int = Field(1000, gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
-    critical_health_line: int = Field(50, gt=0, description="濒死判定线，低于此值将不计代价回血")
-    normal_healing_line: int = Field(100, gt=0, description="治疗触发阈值，低于此值尝试恢复生命")
-    mana_supply_line: int = Field(20, gt=0, description="魔力补给触发阈值，低于此值尝试恢复魔力")
-    pre_battle_health_reserve: int = Field(200, gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
-    pre_battle_mana_reserve: int = Field(20, gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
-    draught_buff_round_threshold: int = Field(5, gt=0, description="持续回复Buff触发回合阈值。当战斗总回合数超过此值时，使用 Health Draught 和 Mana Draught 获取持续的血量、蓝量回复效果")
+    elite_health_threshold: int = Field(gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
+    critical_health_line: int = Field(gt=0, description="濒死判定线，低于此值将不计代价回血")
+    normal_healing_line: int = Field(gt=0, description="治疗触发阈值，低于此值尝试恢复生命")
+    mana_supply_line: int = Field(gt=0, description="魔力补给触发阈值，低于此值尝试恢复魔力")
+    pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
+    pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
+    draught_buff_round_threshold: int = Field(gt=0, description="持续回复Buff触发回合阈值。当战斗总回合数超过此值时，使用 Health Draught 和 Mana Draught 获取持续的血量、蓝量回复效果")
+    spark_buff: bool = Field(description="是否尝试保持 Spark of Life 的 Buff")
     ewma_multiplier: float = Field(0.99, gt=0, description="EMWA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
-    epsilon: float = Field(0.1, description="随机探索率，越大越激进，越小越保守")
 
 
 class AuthenticationConfig(BaseModel):
@@ -212,9 +212,6 @@ class BattleBot:
         if self.api.get_player_health() < self.config.critical_health_line:
             if action := self.__heal(magic_only=False, magic_first=False):
                 return [(action, 0)]
-            # 如果魔法又在 CD，物品也在 CD 或者用不了，实在没法回血，就用保命技能（免疫一次会致死的攻击）
-            if (not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects())) and (action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID)):
-                return [(action, 0)]
         if self.api.get_player_health() < self.config.normal_healing_line:
             if action := self.__heal(magic_only=True):
                 return [(action, 0)]
@@ -224,6 +221,11 @@ class BattleBot:
             for item_name in ["Mana Gem", "Mana Potion"]:
                 if action := self.__try_to_use("item", item_name):
                     return [(action, 0)]
+
+        # 上保命 Buff
+        if self.config.spark_buff and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+            if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
+                return [(action, 0)]
 
         # 丢弃无用物品
         for item_name in ["Mystic Gem", "Spirit Gem"]:
