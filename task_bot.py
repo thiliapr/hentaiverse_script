@@ -50,13 +50,18 @@ def market_bot() -> tuple[int, list[str]]:
         sell_price, count = re.search(r"autofill_from_buy_order\(\d+,(\d+),(\d+)\)", best_order.attrs["onclick"]).groups()
         if count == "0":
             continue
-        marketoken = soup.find("input", attrs={"name": "marketoken"}).attrs["value"]
+        marketoken, update_value = [soup.find("input", attrs={"name": name}).attrs["value"] for name in ["marketoken", "sellorder_update"]]
 
         # 卖出物品，并加入成功列表，计算赚的 Credits
-        request_with_retry(requests.post, href, data={"marketoken": marketoken, "sellorder_batchcount": count, "sellorder_batchprice": sell_price, "sellorder_update": "Place Sell Order"}, **request_kwargs)
+        request_with_retry(requests.post, href, data={"marketoken": marketoken, "sellorder_batchcount": count, "sellorder_batchprice": sell_price, "sellorder_update": update_value}, **request_kwargs)
         items_sold.append(item_id)
         credits_earned += int(count) * int(sell_price)
-    
+
+    # 转移市场 Credit 到账户里
+    soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=mk", **request_kwargs).text, "lxml")
+    marketoken, withdraw_value = [soup.find("input", attrs={"name": name}).attrs["value"] for name in ["marketoken", "account_withdraw"]]
+    request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=mk", data={"marketoken": marketoken, "account_amount": str(credits_earned), "account_withdraw": withdraw_value}, **request_kwargs)
+
     return credits_earned, items_sold
 
 
