@@ -325,7 +325,7 @@ class BattleBot:
                 # 从历史数据预测伤害，计算指标
                 damages = [self.__predict_damage(skill_id, monster) for monster in window]
                 will_die = sum(monster.health < damage for monster, damage in zip(window, damages))
-                kill_deficit = sum(max(monster.health - damage, 0) for monster, damage in zip(window, damages))
+                kill_deficit = sum(max(monster.health - damage, 0) for monster, damage in zip(window, damages)) / len(window)
                 hit_number = len(window)
                 damage_sum = sum(min(damage, monster.health) for monster, damage in zip(window, damages))
                 damage_per_mana = damage_sum / magic.mana_cost
