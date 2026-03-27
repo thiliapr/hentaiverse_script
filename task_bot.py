@@ -246,7 +246,7 @@ def main():
 
         try:
             while True:
-                result = battle_with_skip_riddle(epsilon)
+                battle_result = battle_with_skip_riddle(epsilon)
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
@@ -261,7 +261,7 @@ def main():
         target_henjutsu = config["task_bot"]["training_henjutsu"]
         if target_henjutsu:
             print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu: {target_henjutsu}")
-            if result := train_henjutsu(target_henjutsu):
+            if train_henjutsu(target_henjutsu):
                 print("[TaskBot] [TrainHenjutsu] 成功开始训练！")
 
         # 统计输赢信息，记录
@@ -270,7 +270,7 @@ def main():
         if stats_file.exists():
             stats = json.loads(stats_file.read_text("utf-8"))
         event_stats = stats.setdefault(event_type, {})
-        event_stats[result.name] = event_stats.get(result.name, 0) + 1
+        event_stats[battle_result.name] = event_stats.get(battle_result.name, 0) + 1
         stats_file.write_text(json.dumps(stats, ensure_ascii=False), "utf-8")
 
 
