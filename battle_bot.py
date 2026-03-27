@@ -112,19 +112,17 @@ class BattleBot:
         if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
-    def __heal(self, magic_only: bool, magic_first: bool = True) -> BaseAction | None:
-        # 获取魔法治疗动作
-        action_magic = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID)
-
-        # 如果魔法可用并且指定优先使用魔法，或者只允许使用魔法（不允许消耗品），则直接返回魔法
-        if (action_magic and magic_first) or magic_only:
+    def __heal(self, magic_only: bool) -> BaseAction | None:
+        # 优先使用魔法治疗
+        if action_magic := self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID):
             return action_magic
 
-        # 尝试使用消耗品，不行就再试试魔法
+        # 尝试使用消耗品
+        if magic_only:
+            return
         for item_name in ["Health Gem", "Health Potion"]:
             if action_consumable := self.__try_to_use("item", item_name):
                 return action_consumable
-        return action_magic
 
     def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
         control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
@@ -208,18 +206,19 @@ class BattleBot:
                 if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("item", item_name)):
                     return [(action, 0)]
 
-        # 急救回血和普通回血
-        if self.api.get_player_health() < self.config.critical_health_line:
-            if action := self.__heal(magic_only=False, magic_first=False):
-                return [(action, 0)]
-        if self.api.get_player_health() < self.config.normal_healing_line:
-            if action := self.__heal(magic_only=True):
-                return [(action, 0)]
-
         # 药水回蓝
         if self.api.get_player_mana() < self.config.mana_supply_line:
             for item_name in ["Mana Gem", "Mana Potion"]:
                 if action := self.__try_to_use("item", item_name):
+                    return [(action, 0)]
+
+        # 如果没有保命 Buff，就分情况进行急救回血和普通回血
+        if not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+            if self.api.get_player_health() < self.config.critical_health_line:
+                if action := self.__heal(magic_only=False):
+                    return [(action, 0)]
+            if self.api.get_player_health() < self.config.normal_healing_line:
+                if action := self.__heal(magic_only=True):
                     return [(action, 0)]
 
         # 上保命 Buff
@@ -244,7 +243,7 @@ class BattleBot:
                     return [(action, 0)]
 
                 # 尝试回血到期望值 
-                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(magic_only=False, magic_first=True)):
+                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(magic_only=False)):
                     return [(action, 0)]
 
                 # 尝试回蓝到期望值
