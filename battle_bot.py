@@ -113,16 +113,16 @@ class BattleBot:
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
     def __heal(self, magic_only: bool) -> BaseAction | None:
-        # 优先使用魔法治疗
-        if action_magic := self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID):
+        # 使用魔法治疗
+        action_magic = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID)
+        if magic_only:
             return action_magic
 
-        # 尝试使用消耗品
-        if magic_only:
-            return
+        # 优先尝试使用消耗品，如果都没有可用的回血物品就返回魔法
         for item_name in ["Health Gem", "Health Potion"]:
             if action_consumable := self.__try_to_use("item", item_name):
                 return action_consumable
+        return action_magic
 
     def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
         control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
@@ -276,7 +276,7 @@ class BattleBot:
                     return [(action, 0)]
 
                 # 尝试回血到期望值
-                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(magic_only=False)):
+                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(magic_only=True)):
                     return [(action, 0)]
 
                 # 尝试回蓝到期望值
@@ -326,8 +326,8 @@ class BattleBot:
                 damages = [self.__predict_damage(skill_id, monster) for monster in window]
                 will_die = sum(monster.health < damage for monster, damage in zip(window, damages))
                 kill_deficit = sum(max(monster.health - damage, 0) for monster, damage in zip(window, damages)) / len(window)
-                hit_number = len(window)
                 damage_sum = sum(min(damage, monster.health) for monster, damage in zip(window, damages))
+                hit_number = len(window)
                 damage_per_mana = damage_sum / magic.mana_cost
 
                 # 添加进候选人名单
