@@ -221,7 +221,7 @@ class BattleBot:
                 if action := self.__heal(magic_only=True):
                     return [(action, 0)]
 
-        # 上保命 Buff
+        # 上保命 Buff。注意，Spark of Life 会隐藏实际生命值，导致 API 无法获取实际生命，显示只有 1 点生命值，这不是实际情况
         if self.config.spark_buff and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
             if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
                 return [(action, 0)]
