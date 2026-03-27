@@ -131,20 +131,15 @@ def repair_equipment() -> Callable[[], Any] | None:
 
 def encounter(session_cookies: dict[str, str]) -> Callable[[], Any] | None:
     # Random Encounter is a single-round battle that places players against common foes in order to get a lot credits and EXP.
+    # This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery. A message will be displayed in the ad space at the top of the page and clicking on the link will automatically open a HentaiVerse window to the battle.
     # https://ehwiki.org/wiki/Random_Encounter
     cookies = request_kwargs["cookies"]
     headers = request_kwargs["headers"]
 
-    # 从主页获取最新的 Gallery
-    resp = request_with_retry(requests.get, "https://e-hentai.org/", **request_kwargs)
-    soup = BeautifulSoup(resp.text, "lxml")
-    galleries = [x.find(class_="glink").parent.attrs["href"] for x in soup.find("table", class_="gltc").find_all("tr") if x.find(class_="glink") is not None]
-    session_cookies.update(dict(resp.cookies))
-
     # 发送网页请求
     if "event" not in session_cookies:
         session_cookies["event"] = "1"
-    resp = request_with_retry(requests.get, random.choice(galleries), headers=headers, cookies=cookies | session_cookies)
+    resp = request_with_retry(requests.get, "https://e-hentai.org/news.php", headers=headers, cookies=cookies | session_cookies)
     session_cookies.update(dict(resp.cookies))
 
     # 解析检测随机遇敌事件，并点击遇敌链接
