@@ -40,7 +40,6 @@ class BattleBotConfig(BaseModel):
     mana_supply_line: int = Field(gt=0, description="魔力补给触发阈值，低于此值尝试恢复魔力")
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
-    draught_buff_round_threshold: int = Field(gt=0, description="持续回复Buff触发回合阈值。当战斗总回合数超过此值时，使用 Health Draught 和 Mana Draught 获取持续的血量、蓝量回复效果")
     spark_buff: bool = Field(description="是否尝试保持 Spark of Life 的 Buff")
     ewma_multiplier: float = Field(0.99, gt=0, description="EMWA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
 
@@ -98,9 +97,7 @@ class BattleBot:
         if (result := re.search(r"Round (\d+) / (\d+)", self.api.logs[0][0])) is not None:
             current_rounds, total_rounds = [int(x) for x in result.groups()]
             if current_rounds < total_rounds:
-                self.heal_before_end_flag = True
-            if total_rounds > self.config.draught_buff_round_threshold:
-                self.draught_buff = True
+                self.heal_before_end_flag = self.draught_buff = True
         if any(monster.health > self.config.elite_health_threshold * 2 for monster in self.api.monsters):
             self.draught_buff = True
 
@@ -367,13 +364,14 @@ def battle(epsilon: float, config_override: dict[str, Any] | None = None) -> Bat
     while api.battle_result == BattleResult.IN_PROGRESS:
         # 决定动作
         actions = battle_bot.decide()
-        best_action, best_score = max(actions, key=lambda x: x[1])
-        action, score = best_action, best_score
+        action, score = best_action, best_score = max(actions, key=lambda x: x[1])
 
         # 仅在多个可用动作时打印信息
-        if len(actions) > 1 and random.random() < epsilon:
-            action, score = random.choice(actions)
-            print(f"[battle_bot.battle] [随机探索]\n\t随机选择动作: {action}（分数: {score}）\n\t最佳动作: {best_action}（分数: {best_score}）")
+        if len(actions) > 1:
+            print(f"[battle_bot.battle] 最佳动作: magic={best_action.magic.name}; target={best_action.target}; score={best_score}")
+            if random.random() < epsilon:
+                action, score = random.choice(actions)
+                print(f"[battle_bot.battle] [随机探索] 随机选择动作: magic={action.magic.name}; target={action.target}; score={score}")
 
         # 执行动作
         battle_bot.execute_action(action)
