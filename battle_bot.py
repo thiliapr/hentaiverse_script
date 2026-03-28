@@ -120,8 +120,7 @@ class BattleBot:
         for item_name in ["Health Gem", "Health Potion"]:
             if action_consumable := self.__try_to_use("item", item_name):
                 break
-
-        return action_cure
+        return action_full_cure or action_consumable or action_cure
 
     def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
         control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
