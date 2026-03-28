@@ -23,7 +23,6 @@ def market_bot() -> tuple[int, list[str]]:
 
     # 查看各个过滤器下的物品
     filters = [(filter_element.text, filter_element.attrs["href"]) for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in config["task_bot"]["market_bot"]["skipped_filters"]]
-    filters = []
     items_to_sell = []
     for filter_name, href in tqdm(filters, desc="Fetch Market's Itemlist"):
         soup = BeautifulSoup(request_with_retry(requests.get, href, **request_kwargs).text, "lxml")
