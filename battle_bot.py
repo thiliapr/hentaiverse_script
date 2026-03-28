@@ -109,17 +109,19 @@ class BattleBot:
         if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
-    def __heal(self, magic_only: bool) -> BaseAction | None:
-        # 使用魔法治疗
-        action_magic = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID)
-        if magic_only:
-            return action_magic
+    def __heal(self, critical: bool) -> BaseAction | None:
+        # 便宜回血
+        action_cure = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID)
+        if not critical:
+            return action_cure
 
-        # 优先尝试使用消耗品，如果都没有可用的回血物品就返回魔法
+        # 紧急、昂贵回血
+        action_full_cure = self.__try_to_use("magic", "Full-Cure", target=BattleAPI.PLAYER_ID)
         for item_name in ["Health Gem", "Health Potion"]:
             if action_consumable := self.__try_to_use("item", item_name):
-                return action_consumable
-        return action_magic
+                break
+
+        return action_cure
 
     def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
         control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
@@ -244,10 +246,10 @@ class BattleBot:
         # 如果没有保命 Buff，就分情况进行急救回血和普通回血
         if not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
             if self.api.get_player_health() < self.config.critical_health_line:
-                if action := self.__heal(magic_only=False):
+                if action := self.__heal(critical=True):
                     return [(action, 0)]
             if self.api.get_player_health() < self.config.normal_healing_line:
-                if action := self.__heal(magic_only=True):
+                if action := self.__heal(critical=False):
                     return [(action, 0)]
 
         # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff。注意，Spark of Life 会隐藏实际生命值，导致 API 无法获取实际生命，显示只有 1 点生命值，这不是实际情况
@@ -272,7 +274,7 @@ class BattleBot:
                     return [(action, 0)]
 
                 # 尝试回血到期望值
-                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(magic_only=True)):
+                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)):
                     return [(action, 0)]
 
                 # 尝试回蓝到期望值

@@ -23,6 +23,7 @@ def market_bot() -> tuple[int, list[str]]:
 
     # 查看各个过滤器下的物品
     filters = [(filter_element.text, filter_element.attrs["href"]) for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in config["task_bot"]["market_bot"]["skipped_filters"]]
+    filters = []
     items_to_sell = []
     for filter_name, href in tqdm(filters, desc="Fetch Market's Itemlist"):
         soup = BeautifulSoup(request_with_retry(requests.get, href, **request_kwargs).text, "lxml")
@@ -59,8 +60,9 @@ def market_bot() -> tuple[int, list[str]]:
 
     # 转移市场 Credit 到账户里
     soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=mk", **request_kwargs).text, "lxml")
-    marketoken, withdraw_value = [soup.find("input", attrs={"name": name}).attrs["value"] for name in ["marketoken", "account_withdraw"]]
-    request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=mk", data={"marketoken": marketoken, "account_amount": str(credits_earned), "account_withdraw": withdraw_value}, **request_kwargs)
+    market_balance = re.search(r"\.value=(\d+)", soup.find_all(class_="credit_balance")[1].attrs["onclick"]).group(1)
+    marketoken, action_value = [soup.find("input", attrs={"name": name}).attrs["value"] for name in ["marketoken", "account_withdraw"]]
+    request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=mk", data={"marketoken": marketoken, "account_amount": market_balance, "account_withdraw": action_value}, **request_kwargs)
 
     return credits_earned, items_sold
 
