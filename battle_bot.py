@@ -3,7 +3,7 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, random, re, argparse
+import json, pathlib, random, re, argparse, math, time
 from typing import Any, Literal
 from pydantic import BaseModel, Field
 from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError
@@ -25,7 +25,7 @@ class EWMAData(BaseModel):
 
 
 class SkillData(BaseModel):
-    attack_range: int = Field(0, ge=0, description="技能的攻击范围（能攻击除目标以外，能攻击目标上下各多少只怪兽）")
+    max_targets: int = Field(1, ge=1, description="技能最大能够攻击到多少个怪兽")
     damage: EWMAData = Field(default_factory=EWMAData, description="技能的基础伤害")
 
 
@@ -166,11 +166,10 @@ class BattleBot:
             return textlog
         monster_indices, _, damage_list = zip(*damage_info)
 
-        # 更新技能数据（伤害和范围）
+        # 更新技能数据（伤害和最大攻击范围）
         skill_data = self.skill_data.setdefault(action.logging_skill_id, SkillData(damage=EWMAData(multiplier=self.config.ewma_multiplier)))
         skill_data.damage.add_observation(sum(damage_list) / len(damage_list))
-        target_monster_idx = action.target - BattleAPI.MONSTER_START_ID
-        skill_data.attack_range = max(max(monster_indices) - target_monster_idx, target_monster_idx - min(monster_indices), skill_data.attack_range)
+        skill_data.max_targets = max(max(monster_indices) - min(monster_indices), skill_data.max_targets)
 
         # 更新怪兽数据，用技能基础伤害的倍数表示
         skill_base_damage = skill_data.damage.get_current_average()
@@ -312,11 +311,14 @@ class BattleBot:
                 # Stop beating dead ponies
                 if self.api.monsters[monster_idx].health == 0:
                     continue
-
-                # 获取攻击范围窗口
                 skill_id = f"Magic/{magic.name}"
-                attack_range = self.skill_data[skill_id].attack_range if skill_id in self.skill_data else 0
-                window = self.api.monsters[max(monster_idx - attack_range, 0):monster_idx + attack_range + 1]
+
+                # 获取攻击窗口。以目标为中心，优先填充左侧，左右两侧最多各取 ceil((max_targets-1)/2) 个目标，总数量不超过 max_targets
+                # 示例（max_targets=6，T 代表 Target）: [T B C D] E F G H; A [B C D T F G] H; A B C D [E F G T]
+                max_targets = self.skill_data[skill_id].max_targets if skill_id in self.skill_data else 1
+                targets_up = min(monster_idx, math.ceil((max_targets - 1) / 2))
+                targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
+                window = self.api.monsters[monster_idx - targets_up:monster_idx + targets_down + 1]
                 window = [monster for monster in window if monster.health > 0]
 
                 # 从历史数据预测伤害，计算指标
@@ -361,6 +363,7 @@ def battle(epsilon: float, config_override: dict[str, Any] | None = None) -> Bat
     battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
 
     # 使用 Battle Bot 预测并执行动作
+    last_execution_time = 0
     while api.battle_result == BattleResult.IN_PROGRESS:
         # 决定动作
         actions = battle_bot.decide()
@@ -373,8 +376,13 @@ def battle(epsilon: float, config_override: dict[str, Any] | None = None) -> Bat
                 action, score = random.choice(actions)
                 print(f"[battle_bot.battle] [随机探索] 随机选择动作: magic={action.magic.name}; target={action.target}; score={score}")
 
-        # 执行动作
+        # 控制频率并执行动作
+        # To prevent botting and overloading the server there is a server side restriction which prevents more than 4 turns per second.
+        # https://ehwiki.org/wiki/Action_Speed
+        if (interval := time.time() - last_execution_time) < 1 / 4:
+            time.sleep(1 / 4 - interval)
         battle_bot.execute_action(action)
+        last_execution_time = time.time()
 
     # 保存战斗数据
     for data, prefix, indent, separators in [(all_skill_data, "skill", "\t", None), (all_monster_data, "monster", None, (",", ":"))]:
