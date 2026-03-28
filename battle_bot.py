@@ -324,16 +324,20 @@ class BattleBot:
 
                 # 从历史数据预测伤害，计算指标
                 damages = [self.__predict_damage(skill_id, monster) for monster in window]
-                will_die = sum(monster.health < damage for monster, damage in zip(window, damages))
-                kill_deficit = sum(max(monster.health - damage, 0) for monster, damage in zip(window, damages)) / len(window)
-                damage_sum = sum(min(damage, monster.health) for monster, damage in zip(window, damages))
                 hit_number = len(window)
+                will_die = sum(monster.health < damage for monster, damage in zip(window, damages))
+                kill_deficit = 0
+                if will_die < hit_number:
+                    kill_deficit = min(max(monster.health - damage, 0) for monster, damage in zip(window, damages) if monster.health > damage)
+                damage_sum = sum(min(damage, monster.health) for monster, damage in zip(window, damages))
                 damage_per_mana = damage_sum / magic.mana_cost
 
                 # 添加进候选人名单
                 action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, hit_number, damage_per_mana)))
 
         # 返回可用动作
+        for action, score in sorted(action_scores, key=lambda x: x[1], reverse=True):
+            print(action.magic.name, action.target, score)
         if action_scores:
             return action_scores
         return [(ActionDefend(), 0)]
@@ -357,7 +361,7 @@ def battle(epsilon: float, config_override: dict[str, Any] | None = None) -> Bat
 
     # 创建 Battle Bot
     battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
-    for k, v in config_override.items() | {}:
+    for k, v in (config_override or {}).items():
         setattr(battle_bot_config, k, v)
     battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
 
