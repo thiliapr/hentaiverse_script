@@ -214,7 +214,7 @@ def main():
     encounter_cookies = {}
 
     while True:
-        print("检测战斗事件 ...")
+        print("[TaskBot] [LookForBattle] 检测战斗事件 ...")
         battle_func = None
         if battle_func := encounter(encounter_cookies):
             # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
@@ -224,11 +224,19 @@ def main():
             event_type, difficult_level, epsilon, config_override = "Arena 战斗", config["task_bot"]["arena_difficult_level"], config["task_bot"]["arena_epsilon"], {"spark_buff": False}
 
         if battle_func is None:
-            print("[TaskBot] 没有发现战斗事件，等待一会继续 ...")
+            print("[TaskBot] [LookForBattle] 没有发现战斗事件，等待一会继续 ...")
             # Wiki about Random Encounter: "This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery"
             for _ in tqdm(range(random.randint(1800, 1860)), desc="Waiting"):
                 time.sleep(1)
             continue
+
+        # 训练 Henjutsu（游戏的技能，要花 Credit 和时间训练，可以增加爆率、EXP 倍数等。游戏有 15 个 Hentsuju 可供训练）
+        # https://ehwiki.org/wiki/Training
+        target_henjutsu = config["task_bot"]["training_henjutsu"]
+        if target_henjutsu:
+            print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu: {target_henjutsu}")
+            if train_henjutsu(target_henjutsu):
+                print("[TaskBot] [TrainHenjutsu] 成功开始训练！")
 
         # 战斗前准备事项
         print(f"[TaskBot] [{event_type}] [RepairEquipment] 检测装备损坏 ...")
@@ -258,14 +266,6 @@ def main():
         credits_earned, items_sold = market_bot()
         if credits_earned:
             print(f"赚取了 {credits_earned} Credits。变卖了的物品: {items_sold}")
-
-        # 训练 Henjutsu（游戏的技能，要花 Credit 和时间训练，可以增加爆率、EXP 倍数等。游戏有 15 个 Hentsuju 可供训练）
-        # https://ehwiki.org/wiki/Training
-        target_henjutsu = config["task_bot"]["training_henjutsu"]
-        if target_henjutsu:
-            print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu: {target_henjutsu}")
-            if train_henjutsu(target_henjutsu):
-                print("[TaskBot] [TrainHenjutsu] 成功开始训练！")
 
         # 统计输赢信息，记录
         stats_file = pathlib.Path("stats_data.json")
