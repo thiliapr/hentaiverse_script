@@ -336,8 +336,6 @@ class BattleBot:
                 action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, hit_number, damage_per_mana)))
 
         # 返回可用动作
-        for action, score in sorted(action_scores, key=lambda x: x[1], reverse=True):
-            print(action.magic.name, action.target, score)
         if action_scores:
             return action_scores
         return [(ActionDefend(), 0)]
