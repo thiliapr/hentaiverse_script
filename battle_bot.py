@@ -319,21 +319,20 @@ class BattleBot:
                 max_targets = self.skill_data[skill_id].max_targets if skill_id in self.skill_data else 1
                 targets_up = min(monster_idx, math.ceil((max_targets - 1) / 2))
                 targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
-                window = self.api.monsters[monster_idx - targets_up:monster_idx + targets_down + 1]
-                window = [monster for monster in window if monster.health > 0]
+                window = list(enumerate(self.api.monsters))[monster_idx - targets_up:monster_idx + targets_down + 1]
+                window = [(idx, monster) for idx, monster in window if monster.health > 0]
 
                 # 从历史数据预测伤害，计算指标
-                damages = [self.__predict_damage(skill_id, monster) for monster in window]
-                hit_number = len(window)
-                will_die = sum(monster.health < damage for monster, damage in zip(window, damages))
+                damages = {idx: min(self.__predict_damage(skill_id, monster), monster.health) for idx, monster in window}
+                will_die = sum(damages.get(idx, 0) >= monster.health for idx, monster in window)
                 kill_deficit = 0
-                if will_die < hit_number:
-                    kill_deficit = min(max(monster.health - damage, 0) for monster, damage in zip(window, damages) if monster.health > damage)
-                damage_sum = sum(min(damage, monster.health) for monster, damage in zip(window, damages))
+                if survivor_healths := [x for x in [monster.health - damages.get(idx, 0) for idx, monster in enumerate(self.api.monsters)] if x]:
+                    kill_deficit = min(survivor_healths)
+                damage_sum = sum(damages.values())
                 damage_per_mana = damage_sum / magic.mana_cost
 
                 # 添加进候选人名单
-                action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, hit_number, damage_per_mana)))
+                action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, len(window), damage_per_mana)))
 
         # 返回可用动作
         if action_scores:
