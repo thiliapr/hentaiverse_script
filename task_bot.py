@@ -214,6 +214,14 @@ def main():
     encounter_cookies = {}
 
     while True:
+        # 训练 Henjutsu（游戏的技能，要花 Credit 和时间训练，可以增加爆率、EXP 倍数等。游戏有 15 个 Hentsuju 可供训练）
+        # https://ehwiki.org/wiki/Training
+        target_henjutsu = config["task_bot"]["training_henjutsu"]
+        if target_henjutsu:
+            print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu: {target_henjutsu}")
+            if train_henjutsu(target_henjutsu):
+                print("[TaskBot] [TrainHenjutsu] 成功开始训练！")
+
         print("[TaskBot] [LookForBattle] 检测战斗事件 ...")
         battle_func = None
         if battle_func := encounter(encounter_cookies):
@@ -229,14 +237,6 @@ def main():
             for _ in tqdm(range(random.randint(1800, 1860)), desc="Waiting"):
                 time.sleep(1)
             continue
-
-        # 训练 Henjutsu（游戏的技能，要花 Credit 和时间训练，可以增加爆率、EXP 倍数等。游戏有 15 个 Hentsuju 可供训练）
-        # https://ehwiki.org/wiki/Training
-        target_henjutsu = config["task_bot"]["training_henjutsu"]
-        if target_henjutsu:
-            print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu: {target_henjutsu}")
-            if train_henjutsu(target_henjutsu):
-                print("[TaskBot] [TrainHenjutsu] 成功开始训练！")
 
         # 战斗前准备事项
         print(f"[TaskBot] [{event_type}] [RepairEquipment] 检测装备损坏 ...")
