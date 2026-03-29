@@ -162,8 +162,11 @@ def arena() -> Callable[[], Any] | None:
     page = request_with_retry(requests.get, f"{MAIN_URL}/?s=Battle&ss=ar", **request_kwargs).text
 
     # 获取体力值并检测是否符合条件
+    # |Stamina | Status | Effect |
+    # | 60-99 | Great | +100% EXP but stamina drains 50% faster |
+    # https://ehwiki.org/wiki/Stamina
     stamina, = re.search(r"Stamina: (\d+)", page).groups()
-    if int(stamina) < 64:
+    if int(stamina) < 75:
         return
     
     # 检测可用的 Arena，并筛选
