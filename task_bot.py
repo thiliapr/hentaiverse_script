@@ -98,13 +98,13 @@ def attribute_point_allocation() -> list[str]:
     remaining_exp = int(soup.find(id="remaining_exp").text.replace(",", ""))
     required_exp = {attr: int(soup.find(id=f"{attr}_left").text.replace(",", "")) for attr in attributes}
 
-    # 给 Endurance（增加最大血量、物理减伤、魔法减伤）、Intelligence（增加伤害）、Wisdom（增加最大蓝量、蓝量恢复） 均衡加点
+    # 均衡加点
     # https://ehwiki.org/wiki/Character_Stats#Primary_Attributes
     attr_delta = {attr: 0 for attr in attributes}
-    for attr in sorted(["end", "int", "wis"], key=lambda attr: required_exp[attr]):
-        if (required_exp := int(soup.find(id=f"{attr}_left").text.replace(",", ""))) <= remaining_exp:
+    for attr in sorted(attributes, key=lambda attr: required_exp[attr]):
+        if required_exp[attr] <= remaining_exp:
             attr_delta[attr] = 1
-            remaining_exp -= required_exp
+            remaining_exp -= required_exp[attr]
 
     # 发送请求
     if any(v > 0 for v in attr_delta.values()):
