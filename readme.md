@@ -34,7 +34,6 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "mana_supply_line": 20,
            "pre_battle_health_reserve": 200,
            "pre_battle_mana_reserve": 20,
-           "draught_buff_round_threshold": 5,
            "spark_buff": false
        },
        "task_bot": {
@@ -45,7 +44,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "encounter_difficult_level": "3",
            "arena_difficult_level": "1",
            "arena_epsilon": 0.3,
-           "training_henjutsu": "Adept Learner"
+           "training_henjutsu": ["Adept Learner", "Assimilator", "Scavenger", "Quartermaster", "Luck of the Draw", "Archaeologist"]
        }
    }
    ```

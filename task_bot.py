@@ -66,7 +66,7 @@ def market_bot() -> tuple[int, list[str]]:
     return credits_earned, items_sold
 
 
-def train_henjutsu(target_henjutsu: str) -> bool:
+def train_henjutsu(target_henjutsu: list[str]) -> str | None:
     soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=tr", **request_kwargs).text, "lxml")
     for subject in soup.find(id="train_table").find_all("tr"):
         # 跳过表头
@@ -75,19 +75,17 @@ def train_henjutsu(target_henjutsu: str) -> bool:
             continue
 
         # 根据名字筛选
-        if info_elements[0].text != target_henjutsu:
+        if (henjutsu_name := info_elements[0].text) not in target_henjutsu:
             continue
 
-        # 如果无法训练（比如还在训练，或者 Credits 不够），就直接返回
+        # 如果无法训练（比如还在训练，或者 Credits 不够），看看下一个的情况
         if "onclick" not in (train_button := info_elements[-1].find("img")).attrs:
-            return False
+            continue
         
         # 开始训练
         subject_id, = re.search(r"training.start_training\((\d+)\)", train_button.attrs["onclick"]).groups()
         request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=tr", data={"start_train": subject_id, "cancel_train": "0"}, **request_kwargs)
-        return True
-
-    return False
+        return henjutsu_name
 
 
 def attribute_point_allocation() -> list[str]:
@@ -218,9 +216,9 @@ def main():
         # https://ehwiki.org/wiki/Training
         target_henjutsu = config["task_bot"]["training_henjutsu"]
         if target_henjutsu:
-            print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu: {target_henjutsu}")
-            if train_henjutsu(target_henjutsu):
-                print("[TaskBot] [TrainHenjutsu] 成功开始训练！")
+            print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu ...")
+            if henjutsu_trained := train_henjutsu(target_henjutsu):
+                print(f"[TaskBot] [TrainHenjutsu] 成功开始训练 {henjutsu_trained}")
 
         print("[TaskBot] [LookForBattle] 检测战斗事件 ...")
         battle_func = None
