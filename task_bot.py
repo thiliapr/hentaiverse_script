@@ -67,7 +67,7 @@ def market_bot() -> tuple[int, list[str]]:
     return credits_earned, items_sold
 
 
-def train_henjutsu(target_henjutsu: list[str]) -> str | None:
+def train_henjutsu() -> str | None:
     soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=tr", **request_kwargs).text, "lxml")
     for subject in soup.find(id="train_table").find_all("tr"):
         # 跳过表头
@@ -76,7 +76,7 @@ def train_henjutsu(target_henjutsu: list[str]) -> str | None:
             continue
 
         # 根据名字筛选
-        if (henjutsu_name := info_elements[0].text) not in target_henjutsu:
+        if (henjutsu_name := info_elements[0].text) not in config["task_bot"]["training_henjutsu"]:
             continue
 
         # 如果无法训练（比如还在训练，或者 Credits 不够），看看下一个的情况
@@ -217,11 +217,10 @@ def main():
 
     while True:
         # 训练 Henjutsu（游戏的技能，要花 Credit 和时间训练，可以增加爆率、EXP 倍数等。游戏有 15 个 Hentsuju 可供训练）
-        # https://ehwiki.org/wiki/Training
-        target_henjutsu = config["task_bot"]["training_henjutsu"]
-        if target_henjutsu:
+        # https://ehwiki.org/wiki/Training]
+        if config["task_bot"]["training_henjutsu"]:
             print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu ...")
-            if henjutsu_trained := train_henjutsu(target_henjutsu):
+            if henjutsu_trained := train_henjutsu():
                 print(f"[TaskBot] [TrainHenjutsu] 成功开始训练 {henjutsu_trained}")
 
         print("[TaskBot] [LookForBattle] 检测战斗事件 ...")
