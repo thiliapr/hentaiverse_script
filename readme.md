@@ -41,6 +41,9 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
                "wanted_items": ["Health Draught", "Health Potion", "Mana Draught", "Mana Potion"],
                "skipped_filters": ["Materials", "Trophies"]
            },
+           "equipment_store_bot": {
+               "skipped_filters": ["Staffs", "Cloth"]
+           },
            "encounter_difficult_level": "3",
            "arena_difficult_level": "1",
            "arena_epsilon": 0.3,

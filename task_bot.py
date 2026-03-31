@@ -67,6 +67,33 @@ def market_bot() -> tuple[int, list[str]]:
     return credits_earned, items_sold
 
 
+def equipment_store_bot() -> int:
+    # 获取装备商店主页
+    soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=es", **request_kwargs).text, "lxml")
+    
+    # 卖掉各个过滤器下的物品
+    filters = [filter_element.attrs["href"] for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in config["task_bot"]["equipment_store_bot"]["skipped_filters"]]
+    items_sold = 0
+    for href in tqdm(filters, desc="Sell Equipment Store Items"):
+        soup = BeautifulSoup(request_with_retry(requests.get, href, **request_kwargs).text, "lxml")
+
+        # 遍历每一个物品
+        items_to_sell = []
+        for item_element in soup.find(id="item_pane").find(class_="equiplist").find_all(class_="eqp"):
+            if not (sell_button := item_element.find(attrs={"data-locked": "0"})):
+                continue
+            items_to_sell.append(re.search(r"equips.set\((\d+),'item_pane',\d+,\d+\)", sell_button.attrs["onmouseover"]).group(1))
+
+        # 卖出物品
+        if not items_to_sell:
+            continue
+        storetoken = soup.find("input", attrs={"name": "storetoken"}).attrs["value"]
+        request_with_retry(requests.post, href, data={"storetoken": storetoken, "select_group": "item_pane", "select_eids": ",".join(items_to_sell)}, **request_kwargs)
+        items_sold += len(items_to_sell)
+
+    return items_sold
+
+
 def train_henjutsu() -> str | None:
     soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=tr", **request_kwargs).text, "lxml")
     for subject in soup.find(id="train_table").find_all("tr"):
@@ -263,10 +290,14 @@ def main():
             pass
 
         # 战后变卖不需要的东西
-        print(f"[TaskBot] [{event_type}] 变卖物品 ...")
+        print(f"[TaskBot] [MarketBot] 变卖物品 ...")
         credits_earned, items_sold = market_bot()
         if credits_earned:
-            print(f"赚取了 {credits_earned} Credits。变卖了的物品: {items_sold}")
+            print(f"[TaskBot] [MarketBot] 赚取了 {credits_earned} Credits。变卖了的物品: {items_sold}")
+        
+        print(f"[TaskBot] [EquipmentStoreBot] 变卖装备 ...")
+        if items_sold := equipment_store_bot():
+            print(f"[TaskBot] [EquipmentStoreBot] 变卖了 {items_sold} 件装备")
 
         # 统计输赢信息，记录
         stats_file = pathlib.Path("stats_data.json")
