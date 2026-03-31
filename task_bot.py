@@ -61,7 +61,8 @@ def market_bot() -> tuple[int, list[str]]:
     soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=mk", **request_kwargs).text, "lxml")
     market_balance = re.search(r"\.value=(\d+)", soup.find_all(class_="credit_balance")[1].attrs["onclick"]).group(1)
     marketoken, action_value = [soup.find("input", attrs={"name": name}).attrs["value"] for name in ["marketoken", "account_withdraw"]]
-    request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=mk", data={"marketoken": marketoken, "account_amount": market_balance, "account_withdraw": action_value}, **request_kwargs)
+    if market_balance != "0":
+        request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=mk", data={"marketoken": marketoken, "account_amount": market_balance, "account_withdraw": action_value}, **request_kwargs)
 
     return credits_earned, items_sold
 
