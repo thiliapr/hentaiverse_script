@@ -46,6 +46,14 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "equipment_store_bot": {
                "skipped_filters": ["Staffs", "Cloth"]
            },
+           "battle_bot_override": {
+               "encounter": {
+                   "avoid_triggering_spark": false
+               },
+               "arena": {
+                   "avoid_triggering_spark": true
+               }
+           },
            "encounter_difficult_level": "3",
            "arena_difficult_level": "1",
            "arena_epsilon": 0.3,
