@@ -38,7 +38,6 @@ def market_bot() -> tuple[int, list[str]]:
 
     # 卖出物品
     items_sold = []
-    credits_earned = 0
     for item_id, href in tqdm(items_to_sell, desc="Sell Items"):
         soup = BeautifulSoup(request_with_retry(requests.get, href, **request_kwargs).text, "lxml")
         
@@ -55,7 +54,6 @@ def market_bot() -> tuple[int, list[str]]:
         # 卖出物品，并加入成功列表，计算赚的 Credits
         request_with_retry(requests.post, href, data={"marketoken": marketoken, "sellorder_batchcount": count, "sellorder_batchprice": sell_price, "sellorder_update": update_value}, **request_kwargs)
         items_sold.append(item_id)
-        credits_earned += int(count) * int(sell_price)
 
     # 转移市场 Credit 到账户里
     soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=mk", **request_kwargs).text, "lxml")
@@ -64,7 +62,7 @@ def market_bot() -> tuple[int, list[str]]:
     if market_balance != "0":
         request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=mk", data={"marketoken": marketoken, "account_amount": market_balance, "account_withdraw": action_value}, **request_kwargs)
 
-    return credits_earned, items_sold
+    return int(market_balance), items_sold
 
 
 def equipment_store_bot() -> int:
@@ -291,9 +289,9 @@ def main():
 
         # 战后变卖不需要的东西
         print(f"[TaskBot] [MarketBot] 变卖物品 ...")
-        credits_earned, items_sold = market_bot()
-        if credits_earned:
-            print(f"[TaskBot] [MarketBot] 赚取了 {credits_earned} Credits。变卖了的物品: {items_sold}")
+        market_balance, items_sold = market_bot()
+        if market_balance:
+            print(f"[TaskBot] [MarketBot] 入账 {market_balance} Credits; 变卖了的物品: {items_sold}")
         
         print(f"[TaskBot] [EquipmentStoreBot] 变卖装备 ...")
         if items_sold := equipment_store_bot():
