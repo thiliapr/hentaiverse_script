@@ -154,11 +154,12 @@ class BattleAPI:
         # 返回原始战斗记录
         return textlog
 
-    def __get_player_vital(self, label_id: str) -> int | None:
+    def __get_player_vital(self, label_ids: list[str]) -> int | None:
         # 游戏提供两种 UI: Standard 和 Utilitarian。它们的标签有不同的 ID 前缀
         for prefix in ["", "d"]:
-            if (label := self.__containers["pane_vitals"].find(id=f"{prefix}{label_id}")):
-                return int(label.text)
+            for label_id in label_ids:
+                if (label := self.__containers["pane_vitals"].find(id=f"{prefix}{label_id}")):
+                    return int(label.text)
 
     def __update_monster_health(self, textlog: list[str]):
         # 解析怪兽受到的伤害，并相应地更新怪兽的生命值
@@ -236,17 +237,18 @@ class BattleAPI:
         return self.__do_action({"mode": "attack", "target": target, "skill": 0})
 
     def get_player_health(self) -> int:
-        # 在 Standard UI 下，血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
-        if (health := self.__get_player_vital("vrhb")) is not None:
+        # 处于 Spark of Life 效果且使用的是 Utilitarian UI 时，血量 ID 会变成 vrhd
+        if (health := self.__get_player_vital(["vrhb", "vrhd"])) is not None:
             return health
+        # 在 Standard UI 下，血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
         return 1
 
     def get_player_mana(self) -> int:
         # 无论是在任何模式，蓝量和 Spirit 都是显示在条外的，所以即使为零也会显示，不需要特殊处理
-        return self.__get_player_vital("vrm")
+        return self.__get_player_vital(["vrm"])
 
     def get_player_spirit(self) -> int:
-        return self.__get_player_vital("vrs")
+        return self.__get_player_vital(["vrs"])
 
     def get_player_effects(self) -> list[Effect]:
         return [BattleAPI.__parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__containers["pane_effects"].find_all("img")]

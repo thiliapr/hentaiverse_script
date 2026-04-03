@@ -244,7 +244,7 @@ def main():
 
     while True:
         # 训练 Henjutsu（游戏的技能，要花 Credit 和时间训练，可以增加爆率、EXP 倍数等。游戏有 15 个 Hentsuju 可供训练）
-        # https://ehwiki.org/wiki/Training]
+        # https://ehwiki.org/wiki/Training
         if config["task_bot"]["training_henjutsu"]:
             print(f"[TaskBot] [TrainHenjutsu] 尝试训练 Henjutsu ...")
             if henjutsu_trained := train_henjutsu():
