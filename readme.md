@@ -32,13 +32,15 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "critical_health_line": 50,
            "normal_healing_line": 100,
            "mana_supply_line": 20,
+           "spirit_supply_line": -1,
            "pre_battle_health_reserve": 200,
            "pre_battle_mana_reserve": 20,
-           "spark_buff": false
+           "spark_trigger_spirit": 19890604,
+           "avoid_triggering_spark": true
        },
        "task_bot": {
            "market_bot": {
-               "wanted_items": ["Health Draught", "Health Potion", "Mana Draught", "Mana Potion"],
+               "wanted_items": ["Health Draught", "Health Potion", "Mana Draught", "Mana Potion", "Spirit Draught", "Spirit Potion", "Scrap Cloth", "Scrap Wood"],
                "skipped_filters": ["Materials", "Trophies"]
            },
            "equipment_store_bot": {

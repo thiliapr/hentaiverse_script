@@ -36,12 +36,14 @@ class MonsterData(BaseModel):
 class BattleBotConfig(BaseModel):
     elite_health_threshold: int = Field(gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
     critical_health_line: int = Field(gt=0, description="濒死判定线，低于此值将不计代价回血")
-    normal_healing_line: int = Field(gt=0, description="治疗触发阈值，低于此值尝试恢复生命")
+    normal_healing_line: int = Field(gt=0, description="治疗触发阈值，当血量高于濒死线但低于此值时，会尝试使用普通治疗技能（如非紧急的小恢复术）")
     mana_supply_line: int = Field(gt=0, description="魔力补给触发阈值，低于此值尝试恢复魔力")
+    spirit_supply_line: int = Field(gt=0, description="Spirit 补给触发阈值，低于此值尝试恢复 Spirit")
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
-    spark_buff: bool = Field(description="是否尝试保持 Spark of Life 的 Buff")
-    ewma_multiplier: float = Field(0.99, gt=0, description="EMWA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
+    spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
+    avoid_triggering_spark: bool = Field(description="尽量避免触发 Spark of Life Buff，在低血量时尽可能回血而不是等待 Spark of Life 触发。用于减少 Spirit 消耗")
+    ewma_multiplier: float = Field(0.99, gt=0, description="EWMA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
 
 
 class AuthenticationConfig(BaseModel):
@@ -201,14 +203,9 @@ class BattleBot:
             print("- - " * 20)
             return
 
-        # 获取玩家血量（当持有 Spark of Life Buff 时，游戏不会显示血量）
-        player_health = api.get_player_health()
-        if BattleBot.__has_effect("Spark of Life", api.get_player_effects()):
-            player_health = "Unknown"
-
         # 打印现场情况
         print("+ - " * 10)
-        print(f"Player: Health={player_health}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects_str(api.get_player_effects())}")
+        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects_str(api.get_player_effects())}")
         print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
         print("# = " * 16)
 
@@ -232,18 +229,22 @@ class BattleBot:
     def decide(self) -> list[tuple[BaseAction, tuple | int]]:
         # 敌人血厚时，要有持续回血、回蓝的 Buff
         if self.draught_buff:
-            for item_name, effect_name in [("Health Draught", "Regeneration"), ("Mana Draught", "Replenishment")]:
+            for item_name, effect_name in [("Health Draught", "Regeneration"), ("Mana Draught", "Replenishment"), ("Spirit Draught", "Refreshment")]:
                 if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("item", item_name)):
                     return [(action, 0)]
 
-        # 药水回蓝
+        # 药水回蓝、Spirit 
         if self.api.get_player_mana() < self.config.mana_supply_line:
             for item_name in ["Mana Gem", "Mana Potion"]:
                 if action := self.__try_to_use("item", item_name):
                     return [(action, 0)]
 
+        if self.api.get_player_spirit() < self.config.spirit_supply_line:
+            if action := self.__try_to_use("item", "Spirit Potion"):
+                return [(action, 0)]
+
         # 如果没有保命 Buff，就分情况进行急救回血和普通回血
-        if not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+        if self.config.avoid_triggering_spark or not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
             if self.api.get_player_health() < self.config.critical_health_line:
                 if action := self.__heal(critical=True):
                     return [(action, 0)]
@@ -251,8 +252,8 @@ class BattleBot:
                 if action := self.__heal(critical=False):
                     return [(action, 0)]
 
-        # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff。注意，Spark of Life 会隐藏实际生命值，导致 API 无法获取实际生命，显示只有 1 点生命值，这不是实际情况
-        if self.config.spark_buff and self.api.get_player_spirit() > 1 and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+        # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
+        if self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
             if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
                 return [(action, 0)]
 
