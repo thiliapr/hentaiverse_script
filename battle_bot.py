@@ -387,7 +387,7 @@ def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None 
             print(f"[battle_bot.battle] 最佳动作: skill={best_action.logging_skill_id}; target={best_action.target}; score={best_score}")
             if random.random() < epsilon:
                 action, score = random.choice(actions)
-                print(f"[battle_bot.battle] [随机探索] 随机选择动作: magic={action.magic.name}; target={action.target}; score={score}")
+                print(f"[battle_bot.battle] [随机探索] 随机选择动作: skill={best_action.logging_skill_id}; target={action.target}; score={score}")
 
         # 控制频率并执行动作
         # To prevent botting and overloading the server there is a server side restriction which prevents more than 4 turns per second.
