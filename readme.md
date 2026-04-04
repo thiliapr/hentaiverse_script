@@ -19,7 +19,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
 - `task_bot.py`: 根据`battle_bot.py`写的自动做任务脚本，包括检测体力值并进行[Arena](https://ehwiki.org/wiki/Arena)战斗、浏览[E-Hentai Gallery](https://ehwiki.org/wiki/Galleries)并进行[随机遇敌事件](https://ehwiki.org/wiki/Random_Encounter)、修复装备（请确保材料足够，你可以通过事先在 [Market](https://hentaiverse.org/?s=Bazaar&ss=mk&screen=browseitems&filter=ma) 买够）、属性加点、贩卖无用物品（在配置指定不想贩卖的过滤器和物品），并简单地忽略[小马谜题](https://ehwiki.org/wiki/RiddleMaster)（注意，小马谜题错误率过高会导致体力消耗过快，请慎重使用）
 
 ### 快速使用
-1. 填写`config.json`并保存，示例如下（`ipb_member_id`和`ipb_pass_hash`获取方法请见[前作的介绍](https://github.com/thiliapr/hentaiverse_battle_bot/?tab=readme-ov-file#%E6%B5%81%E7%A8%8B)）
+1. 填写`world/persistent/config.json`并保存，示例如下（`ipb_member_id`和`ipb_pass_hash`获取方法请见[前作的介绍](https://github.com/thiliapr/hentaiverse_battle_bot/?tab=readme-ov-file#%E6%B5%81%E7%A8%8B)）
    ```json
    {
        "authentication": {
@@ -61,11 +61,17 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
        }
    }
    ```
-2. 创建文件`skill_data.json`和`monster_data.json`，内容如下
+2. 创建文件`world/persistent/skill_data.json`和`world/persistent/monster_data.json`，内容如下
    ```json
    {}
    ```
 3. 运行`python task_bot.py`，大功告成
+
+### 异世界
+1. 异世界的介绍请参见 [Wiki](https://ehwiki.org/wiki/Isekai)
+2. - 使用方法快速使用相同，但是把 `world/persistent` 改成 `world/isekai`，然后填写异世界专用配置
+   - 配置只需要填写 `authentication` 和 `battle_bot` 项，不需要填写 `task_bot` 项
+3. 运行时手动打开异世界的战斗，然后运行 `python battle_bot.py --isekai` 即可
 
 ## 怎么写自己的脚本
 请参考`battle_bot.py`的内容和`utils/battle.py`的`BattleAPI`类的方法

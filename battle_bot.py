@@ -3,6 +3,7 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
+from functools import partial
 import json, pathlib, random, re, argparse, math, time
 from typing import Any, Literal
 from pydantic import BaseModel, Field
@@ -37,8 +38,8 @@ class BattleBotConfig(BaseModel):
     elite_health_threshold: int = Field(gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
     critical_health_line: int = Field(gt=0, description="濒死判定线，低于此值将不计代价回血")
     normal_healing_line: int = Field(gt=0, description="治疗触发阈值，当血量高于濒死线但低于此值时，会尝试使用普通治疗技能（如非紧急的小恢复术）")
-    mana_supply_line: int = Field(gt=0, description="魔力补给触发阈值，低于此值尝试恢复魔力")
-    spirit_supply_line: int = Field(gt=0, description="Spirit 补给触发阈值，低于此值尝试恢复 Spirit")
+    mana_supply_line: int = Field(description="魔力补给触发阈值，低于此值尝试恢复魔力")
+    spirit_supply_line: int = Field(description="Spirit 补给触发阈值，低于此值尝试恢复 Spirit")
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
     spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
@@ -158,11 +159,10 @@ class BattleBot:
     def __update_after_action(self, action: ActionMagic | ActionAttack, textlog: list[str]):
         # 分析伤害
         damage_info = []
-        for log in textlog:
-            if (res := BattleAPI.parse_damage(log)) is not None:
-                if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(self.api.monsters) if monster.name == res.monster_name), None)) is not None:
-                    monster_id, monster_index = monster_info
-                    damage_info.append((monster_index, monster_id, int(res.damage)))
+        for monster_name, damage in BattleAPI.parse_damage(textlog):
+            if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(self.api.monsters) if monster.name == monster_name), None)) is not None:
+                monster_id, monster_index = monster_info
+                damage_info.append((monster_index, monster_id, int(damage)))
 
         # 没有造成任何伤害时跳过数据库更新
         if not damage_info:
@@ -343,14 +343,19 @@ class BattleBot:
         return [(ActionDefend(), 0)]
 
 
-def battle(epsilon: float, config_override: dict[str, Any] | None = None) -> BattleResult:
+def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None = None) -> BattleResult:
     # 加载战斗数据和配置文件
-    all_skill_data, all_monster_data, config = [json.loads(pathlib.Path(f"{name}.json").read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
+    root_dir = pathlib.Path("world/persistent")
+    if isekai:
+        root_dir = pathlib.Path("world/isekai")
+    root_dir.mkdir(parents=True, exist_ok=True)
+
+    all_skill_data, all_monster_data, config = [json.loads((root_dir / pathlib.Path(f"{name}.json")).read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
     all_skill_data, all_monster_data = [{k: data_class.model_validate(v) for k, v in data.items()} for data, data_class in [(all_skill_data, SkillData), (all_monster_data, MonsterData)]]
 
     # 创建 API
-    authentication_config = AuthenticationConfig.model_validate(config["authentication"])
-    api = BattleAPI(authentication_config.ipb_member_id, authentication_config.ipb_pass_hash, authentication_config.user_agent)
+    auth_config = AuthenticationConfig.model_validate(config["authentication"])
+    api = BattleAPI(isekai, auth_config.ipb_member_id, auth_config.ipb_pass_hash, auth_config.user_agent)
 
     # 打印初始日志
     print("= - " * 20)
@@ -389,27 +394,29 @@ def battle(epsilon: float, config_override: dict[str, Any] | None = None) -> Bat
 
     # 保存战斗数据
     for data, prefix, indent, separators in [(all_skill_data, "skill", "\t", None), (all_monster_data, "monster", None, (",", ":"))]:
-        pathlib.Path(f"{prefix}_data.json").write_text(json.dumps({k: v.model_dump() for k, v in data.items()}, indent=indent, separators=separators), encoding="utf-8")
+        (root_dir / pathlib.Path(f"{prefix}_data.json")).write_text(json.dumps({k: v.model_dump() for k, v in data.items()}, indent=indent, separators=separators), encoding="utf-8")
 
     return api.battle_result
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--isekai", action="store_true", help="游戏分两个模式: Persistent 和 Isekai。指定该 flag 以进行异世界的战斗")
     parser.add_argument("-e", "--epsilon", type=float, default=0., help="随机探索率，越大越激进，越小越保守")
     parser.add_argument("-l", "--loop", action="store_true", help="一直尝试进行战斗，直到找不到战斗")
     return parser.parse_args(args)
 
 
 def main(args: argparse.Namespace):
+    battle_func = partial(battle, args.isekai, args.epsilon)
     if args.loop:
         try:
             while True:
-                battle(args.epsilon)
+                battle_func()
         except TokenNotFoundError:
             print("检测不到 battle_token，大概是没有战斗了")
     else:
-        battle(args.epsilon)
+        battle_func()
 
 
 if __name__ == "__main__":

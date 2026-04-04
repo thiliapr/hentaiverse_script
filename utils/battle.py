@@ -46,14 +46,6 @@ class Monster(BaseModel):
     effects: list[Effect] = Field([], description="怪兽身上的各种 Buff")
 
 
-class DamageLog(BaseModel):
-    skill_name: str = Field(description="什么技能造成了伤害")
-    action: str = Field(description="造成了怎样的伤害，比如 hit、crit、blast")
-    monster_name: str = Field(description="被伤害了的怪兽的名字")
-    damage: int = Field(ge=1, description="造成了多少生命值的伤害")
-    attribute: str | None = Field(description="造成的是什么属性的伤害")
-
-
 class BattleResult(enum.Enum):
     IN_PROGRESS = enum.auto()
     VICTORY = enum.auto()
@@ -70,11 +62,16 @@ class BattleAPI:
     PLAYER_ID = 0
     MONSTER_START_ID = 1
 
-    def __init__(self, ipb_member_id: str, ipb_pass_hash: str, user_agent: str | None = None):
+    def __init__(self, isekai: bool, ipb_member_id: str, ipb_pass_hash: str, user_agent: str | None = None):
         # 定义 request 参数
         self.__request_kwargs = {"cookies": {"ipb_member_id": ipb_member_id, "ipb_pass_hash": ipb_pass_hash}}
         if user_agent:
             self.__request_kwargs["headers"] = {"User-Agent": user_agent}
+
+        # 定义游戏主页
+        self.main_url = MAIN_URL
+        if isekai:
+            self.main_url += "/isekai"
 
         # 根据页面更新 soup 和战斗记录
         self.__containers = {container_id: None for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
@@ -102,7 +99,7 @@ class BattleAPI:
             # 发送动作包给服务器
             resp_json = None
             try:
-                resp_json = requests.post(f"{MAIN_URL}/json", json=action, timeout=30, **self.__request_kwargs).json()
+                resp_json = requests.post(f"{self.main_url}/json", json=action, timeout=30, **self.__request_kwargs).json()
             except (requests.exceptions.ChunkedEncodingError, requests.ConnectionError, requests.ReadTimeout) as e:
                 print(f"[BattleAPI.__do_action] 发生了网络错误: {e}")
 
@@ -165,13 +162,7 @@ class BattleAPI:
         # 解析怪兽受到的伤害，并相应地更新怪兽的生命值
         # 你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.monsters)}
-        for log in textlog:
-            monster_name = None
-            # Persistent 伤害日志格式: $skill_name $effect(全小写字母且动词第三人称单数形式) $monster_name(怪兽名字复杂多变) for $damage ($damage_type[SPACE])?damage
-            if (res := BattleAPI.parse_damage(log)) is not None:
-                monster_name = res.monster_name
-                damage = res.damage
-
+        for monster_name, damage in BattleAPI.parse_damage(textlog):
             # 更新怪兽生命值
             if monster_name in monster_name_to_idx:
                 monster = self.monsters[monster_name_to_idx[monster_name]]
@@ -198,7 +189,7 @@ class BattleAPI:
 
     def __refresh_page_and_parse(self) -> tuple[str, dict[str, Tag], list[str]]:
         # 获取战斗界面
-        page = request_with_retry(requests.get, MAIN_URL, **self.__request_kwargs).text
+        page = request_with_retry(requests.get, self.main_url, **self.__request_kwargs).text
 
         # 获取 battle_token
         if (result := re.search('var battle_token = "([^"]+)"', page)) is None:
@@ -219,10 +210,29 @@ class BattleAPI:
         return Effect(name=name, description=description, remaining_turns=remaining_turns)
 
     @staticmethod
-    def parse_damage(log: str) -> DamageLog | None:
-        if (res := re.search(r"([\w ]+) ([a-z]+)s ([\w\W]+) for (\d+) (\w+)? ?damage", log)) is not None:
-            skill_name, action, monster_name, damage, attribute = res.groups()
-            return DamageLog(skill_name=skill_name, action=action, monster_name=monster_name, damage=damage, attribute=attribute)
+    def parse_damage(logs: list[str]) -> list[tuple[str, int]]:
+        damages = []
+        for log in logs:
+            monster_name = damage = None
+            # Natsuiro Matsuri resists, and was glanced for 8964 Seiso damage.
+            # 你问我为什么 resists 前的不是可选的？游戏就是这么显示的（"Natsuiro Matsuri  was glanced for 8964 Seiso damage."，有两个空格），我觉得这是游戏记录的 bug
+            if (res := re.search(r"(.+?) (resists, and)? was \w+ for (\d+) \w+ damage", log)) is not None:
+                monster_name, _, damage = res.groups()
+            # Smite hits Natsuiro Matsuri for 19890604 seiso damage.
+            elif (res := re.search(r"[\w ]+ [a-z]+s (.+) for (\d+) (\w+ )?damage", log)) is not None:
+                monster_name, damage, _ = res.groups()
+            # Arcane Blow hits Natsuiro Matsuri, which partially parries, causing 114514 points of Seiso damage.
+            elif (res := re.search(r"[\w ]+ [a-z]+s (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log)) is not None:
+                monster_name, _, damage = res.groups()
+            # You drain 1919810 points of health from Natsuiro Matsuri.
+            elif (res := re.search(r"You drain (\d)+ points of health from (.+).", log)) is not None:
+                damage, monster_name = res.groups()
+
+            # 添加解析结果到伤害列表
+            if monster_name and damage:
+                damages.append((monster_name, int(damage)))
+
+        return damages
 
     def use_magic(self, magic: Magic, target: int) -> list[str]:
         return self.__do_action({"mode": "magic", "target": target, "skill": magic.skill_id})

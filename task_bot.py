@@ -13,7 +13,7 @@ from utils.network import request_with_retry
 from utils.battle import TokenNotFoundError
 from battle_bot import battle
 
-config = json.loads(pathlib.Path("config.json").read_text("utf-8"))
+config = json.loads(pathlib.Path("world/persistent/config.json").read_text("utf-8"))
 request_kwargs = {"cookies": {"ipb_member_id": config["authentication"]["ipb_member_id"], "ipb_pass_hash": config["authentication"]["ipb_pass_hash"]}, "headers": {"User-Agent": config["authentication"]["user_agent"]}}
 
 
@@ -282,7 +282,7 @@ def main():
 
         try:
             while True:
-                battle_result = battle_with_skip_riddle(epsilon, config_override)
+                battle_result = battle_with_skip_riddle(False, epsilon, config_override)
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
@@ -298,7 +298,7 @@ def main():
             print(f"[TaskBot] [EquipmentStoreBot] 变卖了 {items_sold} 件装备")
 
         # 统计输赢信息，记录
-        stats_file = pathlib.Path("stats_data.json")
+        stats_file = pathlib.Path("world/persistent/stats_data.json")
         stats = {}
         if stats_file.exists():
             stats = json.loads(stats_file.read_text("utf-8"))
