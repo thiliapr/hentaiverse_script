@@ -156,7 +156,7 @@ class BattleBot:
                 multiplier = monster_data.damage_multiplier[skill_id].get_current_average()
         return skill_base_damage * multiplier
 
-    def __update_after_action(self, action: ActionMagic | ActionAttack, textlog: list[str]):
+    def __update_data_after_action(self, action: ActionMagic | ActionAttack, textlog: list[str]):
         # 分析伤害
         damage_info = []
         for monster_name, damage in BattleAPI.parse_damage(textlog):
@@ -180,6 +180,29 @@ class BattleBot:
             self.monster_data.setdefault(monster_id, MonsterData()).damage_multiplier.setdefault(action.logging_skill_id, EWMAData(multiplier=self.config.ewma_multiplier)).add_observation(damage / skill_base_damage)
 
         return textlog
+
+    def __analyze_score(self, skill_id: str, monster_idx: int, mana_cost: int) -> tuple:
+        # 获取攻击窗口。以目标为中心，尽量保持对称（多出一个就给左侧），左右两侧最多各取 ceil((max_targets-1)/2) 个目标，总数量不超过 max_targets
+        # 示例（max_targets=6，T 代表 Target）: [T B C D] E F G H; A [B C D T F G] H; A B C D [E F G T]
+        # 你问我为什么这个窗口是这个逻辑？我咋知道，我就是个写外挂的，这个问题得问游戏开发者去
+        max_targets = self.skill_data[skill_id].max_targets if skill_id in self.skill_data else 1
+        targets_up = min(monster_idx, math.ceil((max_targets - 1) / 2))
+        targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
+        window = list(enumerate(self.api.monsters))[monster_idx - targets_up:monster_idx + targets_down + 1]
+        window = [(idx, monster) for idx, monster in window if monster.health > 0]
+
+        # 从历史数据预测伤害，计算指标
+        raw_damage_dealt = {idx: self.__predict_damage(skill_id, monster) for idx, monster in window}
+        actual_damage_taken = {idx: min(damage, self.api.monsters[idx].health) for idx, damage in raw_damage_dealt.items()}
+        will_die = sum(actual_damage_taken.get(idx, 0) >= monster.health for idx, monster in window)
+        kill_deficit = 0
+        if survivor_healths := [x for x in [monster.health - actual_damage_taken.get(idx, 0) for idx, monster in enumerate(self.api.monsters)] if x]:
+            kill_deficit = min(survivor_healths)
+        damage_sum = sum(actual_damage_taken.values())
+        damage_per_mana = damage_sum / max(mana_cost, 1)
+
+        return will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
+
 
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
@@ -222,7 +245,7 @@ class BattleBot:
 
         # 记录伤害
         if action.logging_skill_id:
-            self.__update_after_action(action, textlog)
+            self.__update_data_after_action(action, textlog)
 
         return textlog
 
@@ -257,12 +280,9 @@ class BattleBot:
             if action := self.__try_to_use("item", item_name):
                 return [(action, 0)]
 
-        # 战斗结束前策略
-        monster_health = [(idx, monster.health) for idx, monster in enumerate(self.api.monsters) if monster.health > 0]
-        if len(monster_health) == 1:
-            monster_idx, health = monster_health[0]
-
-            # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
+        # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
+        alive_monsters = [idx for idx, monster in enumerate(self.api.monsters) if monster.health]
+        if len(alive_monsters) == 1:
             if self.heal_before_end_flag and ((self.api.get_player_health() < self.config.pre_battle_health_reserve and not self.__has_effect("Spark of Life", self.api.get_player_effects())) or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
                 # 给敌人打麻药
                 if action := self.__control_monster(monster_idx, with_sleep=True):
@@ -278,10 +298,6 @@ class BattleBot:
                         if action := self.__try_to_use("item", item_name):
                             return [(action, 0)]
                     return [(ActionDefend(), 0)]
-
-            # 如果只有一个怪，而且血量很低，普通攻击
-            if health < self.__predict_damage("Attack/Attack", self.api.monsters[monster_idx]):
-                return [(ActionAttack(target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id="Attack/Attack"), 0)]
 
         # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
         if self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
@@ -306,36 +322,26 @@ class BattleBot:
 
         # 选择攻击魔法和目标
         action_scores = []
-        for magic in self.api.get_player_magics():
-            if magic.category != "magic_damage" or not magic.available:
+        for monster_idx in range(len(self.api.monsters)):
+            # Stop beating dead ponies
+            if self.api.monsters[monster_idx].health == 0:
                 continue
-            for monster_idx in range(len(self.api.monsters)):
-                # Stop beating dead ponies
-                if self.api.monsters[monster_idx].health == 0:
+            attack_target = BattleAPI.MONSTER_START_ID + monster_idx
+
+            # 遍历每个魔法
+            for magic in self.api.get_player_magics():
+                if magic.category != "magic_damage" or not magic.available:
                     continue
+
+                # 获取分数，并添加进候选人名单
                 skill_id = f"Magic/{magic.name}"
+                score = self.__analyze_score(skill_id, monster_idx, magic.mana_cost)
+                action_scores.append((ActionMagic(magic=magic, target=attack_target, logging_skill_id=skill_id), score))
 
-                # 获取攻击窗口。以目标为中心，尽量保持对称（多出一个就给左侧），左右两侧最多各取 ceil((max_targets-1)/2) 个目标，总数量不超过 max_targets
-                # 示例（max_targets=6，T 代表 Target）: [T B C D] E F G H; A [B C D T F G] H; A B C D [E F G T]
-                # 你问我为什么这个窗口是这个逻辑？我咋知道，我就是个写外挂的，这个问题得问游戏开发者去
-                max_targets = self.skill_data[skill_id].max_targets if skill_id in self.skill_data else 1
-                targets_up = min(monster_idx, math.ceil((max_targets - 1) / 2))
-                targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
-                window = list(enumerate(self.api.monsters))[monster_idx - targets_up:monster_idx + targets_down + 1]
-                window = [(idx, monster) for idx, monster in window if monster.health > 0]
-
-                # 从历史数据预测伤害，计算指标
-                raw_damage_dealt = {idx: self.__predict_damage(skill_id, monster) for idx, monster in window}
-                actual_damage_taken = {idx: min(damage, self.api.monsters[idx].health) for idx, damage in raw_damage_dealt.items()}
-                will_die = sum(actual_damage_taken.get(idx, 0) >= monster.health for idx, monster in window)
-                kill_deficit = 0
-                if survivor_healths := [x for x in [monster.health - actual_damage_taken.get(idx, 0) for idx, monster in enumerate(self.api.monsters)] if x]:
-                    kill_deficit = min(survivor_healths)
-                damage_sum = sum(actual_damage_taken.values())
-                damage_per_mana = damage_sum / magic.mana_cost
-
-                # 添加进候选人名单
-                action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values()))))
+            # 获取普通攻击情况
+            skill_id = f"Attack/Attack"
+            score = self.__analyze_score(skill_id, monster_idx, 0)
+            action_scores.append((ActionAttack(target=attack_target, logging_skill_id=skill_id), score))
 
         # 返回可用动作
         if action_scores:
