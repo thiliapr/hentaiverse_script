@@ -69,9 +69,9 @@ class BattleAPI:
             self.__request_kwargs["headers"] = {"User-Agent": user_agent}
 
         # 定义游戏主页
-        self.main_url = MAIN_URL
+        self.__main_url = MAIN_URL
         if isekai:
-            self.main_url += "/isekai"
+            self.__main_url += "/isekai"
 
         # 根据页面更新 soup 和战斗记录
         self.__containers = {container_id: None for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
@@ -99,7 +99,7 @@ class BattleAPI:
             # 发送动作包给服务器
             resp_json = None
             try:
-                resp_json = requests.post(f"{self.main_url}/json", json=action, timeout=30, **self.__request_kwargs).json()
+                resp_json = requests.post(f"{self.__main_url}/json", json=action, timeout=30, **self.__request_kwargs).json()
             except (requests.exceptions.ChunkedEncodingError, requests.ConnectionError, requests.ReadTimeout) as e:
                 print(f"[BattleAPI.__do_action] 发生了网络错误: {e}")
 
@@ -189,7 +189,7 @@ class BattleAPI:
 
     def __refresh_page_and_parse(self) -> tuple[str, dict[str, Tag], list[str]]:
         # 获取战斗界面
-        page = request_with_retry(requests.get, self.main_url, **self.__request_kwargs).text
+        page = request_with_retry(requests.get, self.__main_url, **self.__request_kwargs).text
 
         # 获取 battle_token
         if (result := re.search('var battle_token = "([^"]+)"', page)) is None:
