@@ -384,7 +384,7 @@ def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None 
 
         # 仅在多个可用动作时打印信息
         if len(actions) > 1:
-            print(f"[battle_bot.battle] 最佳动作: magic={best_action.magic.name}; target={best_action.target}; score={best_score}")
+            print(f"[battle_bot.battle] 最佳动作: skill={best_action.logging_skill_id}; target={best_action.target}; score={best_score}")
             if random.random() < epsilon:
                 action, score = random.choice(actions)
                 print(f"[battle_bot.battle] [随机探索] 随机选择动作: magic={action.magic.name}; target={action.target}; score={score}")
