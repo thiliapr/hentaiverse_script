@@ -192,7 +192,7 @@ def arena() -> Callable[[], Any] | None:
     # | 60-99 | Great | +100% EXP but stamina drains 50% faster |
     # https://ehwiki.org/wiki/Stamina
     stamina, = re.search(r"Stamina: (\d+)", page).groups()
-    if int(stamina) < 75:
+    if int(stamina) < 85:
         return
     
     # 检测可用的 Arena，并筛选
