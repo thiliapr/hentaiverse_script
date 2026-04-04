@@ -144,7 +144,7 @@ class BattleBot:
             if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
                 return action
 
-    def __predict_damage(self, skill_id: str, monster: Monster) -> int:
+    def __predict_damage(self, skill_id: str, monster: Monster) -> float:
         if skill_id not in self.skill_data:
             return 19890604
         skill_base_damage = self.skill_data[skill_id].damage.get_current_average()
@@ -315,8 +315,9 @@ class BattleBot:
                     continue
                 skill_id = f"Magic/{magic.name}"
 
-                # 获取攻击窗口。以目标为中心，优先填充左侧，左右两侧最多各取 ceil((max_targets-1)/2) 个目标，总数量不超过 max_targets
+                # 获取攻击窗口。以目标为中心，尽量保持对称（多出一个就给左侧），左右两侧最多各取 ceil((max_targets-1)/2) 个目标，总数量不超过 max_targets
                 # 示例（max_targets=6，T 代表 Target）: [T B C D] E F G H; A [B C D T F G] H; A B C D [E F G T]
+                # 你问我为什么这个窗口是这个逻辑？我咋知道，我就是个写外挂的，这个问题得问游戏开发者去
                 max_targets = self.skill_data[skill_id].max_targets if skill_id in self.skill_data else 1
                 targets_up = min(monster_idx, math.ceil((max_targets - 1) / 2))
                 targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
@@ -324,16 +325,17 @@ class BattleBot:
                 window = [(idx, monster) for idx, monster in window if monster.health > 0]
 
                 # 从历史数据预测伤害，计算指标
-                damages = {idx: min(self.__predict_damage(skill_id, monster), monster.health) for idx, monster in window}
-                will_die = sum(damages.get(idx, 0) >= monster.health for idx, monster in window)
+                raw_damage_dealt = {idx: self.__predict_damage(skill_id, monster) for idx, monster in window}
+                actual_damage_taken = {idx: min(damage, self.api.monsters[idx].health) for idx, damage in raw_damage_dealt.items()}
+                will_die = sum(actual_damage_taken.get(idx, 0) >= monster.health for idx, monster in window)
                 kill_deficit = 0
-                if survivor_healths := [x for x in [monster.health - damages.get(idx, 0) for idx, monster in enumerate(self.api.monsters)] if x]:
+                if survivor_healths := [x for x in [monster.health - actual_damage_taken.get(idx, 0) for idx, monster in enumerate(self.api.monsters)] if x]:
                     kill_deficit = min(survivor_healths)
-                damage_sum = sum(damages.values())
+                damage_sum = sum(actual_damage_taken.values())
                 damage_per_mana = damage_sum / magic.mana_cost
 
                 # 添加进候选人名单
-                action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, len(window), damage_per_mana)))
+                action_scores.append((ActionMagic(magic=magic, target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id=skill_id), (will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values()))))
 
         # 返回可用动作
         if action_scores:
