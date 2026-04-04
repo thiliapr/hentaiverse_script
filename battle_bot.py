@@ -346,7 +346,6 @@ class BattleBot:
         # 返回可用动作
         if action_scores:
             return action_scores
-        return [(ActionDefend(), 0)]
 
 
 def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None = None) -> BattleResult:
