@@ -203,7 +203,6 @@ class BattleBot:
 
         return will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
 
-
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
         def format_effects_str(effects: list[Effect]) -> str:
@@ -285,7 +284,7 @@ class BattleBot:
         if len(alive_monsters) == 1:
             if self.heal_before_end_flag and ((self.api.get_player_health() < self.config.pre_battle_health_reserve and not self.__has_effect("Spark of Life", self.api.get_player_effects())) or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
                 # 给敌人打麻药
-                if action := self.__control_monster(monster_idx, with_sleep=True):
+                if action := self.__control_monster(alive_monsters[0], with_sleep=True):
                     return [(action, 0)]
 
                 # 尝试回血到期望值
