@@ -252,11 +252,6 @@ class BattleBot:
                 if action := self.__heal(critical=False):
                     return [(action, 0)]
 
-        # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
-        if self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
-            if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
-                return [(action, 0)]
-
         # 丢弃无用物品
         for item_name in ["Mystic Gem", "Spirit Gem"]:
             if action := self.__try_to_use("item", item_name):
@@ -287,6 +282,11 @@ class BattleBot:
             # 如果只有一个怪，而且血量很低，普通攻击
             if health < self.__predict_damage("Attack/Attack", self.api.monsters[monster_idx]):
                 return [(ActionAttack(target=BattleAPI.MONSTER_START_ID + monster_idx, logging_skill_id="Attack/Attack"), 0)]
+
+        # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
+        if self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+            if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
+                return [(action, 0)]
 
         # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
         bosses = [(monster_idx, monster) for monster_idx, monster in enumerate(self.api.monsters) if monster.health > self.config.elite_health_threshold]
