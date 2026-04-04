@@ -237,7 +237,7 @@ class BattleAPI:
         return self.__do_action({"mode": "attack", "target": target, "skill": 0})
 
     def get_player_health(self) -> int:
-        # 处于 Spark of Life 效果且使用的是 Utilitarian UI 时，血量 ID 会变成 vrhd
+        # 处于 Spark of Life 效果时，血量 ID 会变成 vrhd
         if (health := self.__get_player_vital(["vrhb", "vrhd"])) is not None:
             return health
         # 在 Standard UI 下，血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
