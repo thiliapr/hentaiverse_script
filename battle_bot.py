@@ -452,7 +452,7 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
 
     # 创建 API
     auth_config = AuthenticationConfig.model_validate(config["authentication"])
-    api = BattleAPI(isekai, auth_config.ipb_member_id, auth_config.ipb_pass_hash, auth_config.user_agent)
+    api = BattleAPI(isekai, auth_config)
 
     # 打印初始日志
     print("= - " * 20)

@@ -68,11 +68,11 @@ class BattleAPI:
     PLAYER_ID = 0
     MONSTER_START_ID = 1
 
-    def __init__(self, isekai: bool, ipb_member_id: str, ipb_pass_hash: str, user_agent: str | None = None):
+    def __init__(self, isekai: bool, auth_config: AuthenticationConfig):
         # 定义 request 参数
-        self.__request_kwargs = {"cookies": {"ipb_member_id": ipb_member_id, "ipb_pass_hash": ipb_pass_hash}}
-        if user_agent:
-            self.__request_kwargs["headers"] = {"User-Agent": user_agent}
+        self.__request_kwargs = {"cookies": {"ipb_member_id": auth_config.ipb_member_id, "ipb_pass_hash": auth_config.ipb_pass_hash}}
+        if auth_config.user_agent:
+            self.__request_kwargs["headers"] = {"User-Agent": auth_config.user_agent}
 
         # 定义游戏主页
         self.__main_url = MAIN_URL
