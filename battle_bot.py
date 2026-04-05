@@ -30,7 +30,7 @@ class GameData(BaseModel):
     skill_damage_base: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能的基础伤害值")
     skill_max_enemies_hit: dict[str, int] = Field(default_factory=dict, description="每个攻击技能最多能同时攻击到的怪兽数量")
     skill_recovery_amount: dict[str, int] = Field(default_factory=dict, description="生命回复技能的最大回复量")
-    skill_reaction_monsters: dict[str, EWMAData] = Field(default_factory=dict, description="每个动作执行后，会遭到反击的怪兽数量比例。例如值为 0.5 表示一半怪兽会反击，1 表示全部怪兽会反击")
+    skill_reaction_monsters: dict[str, EWMAData] = Field(default_factory=dict, description="每个动作执行后，会遭到反击的怪兽数量比例。例如值为 0.5 表示一半怪兽会反击，1 表示全部怪兽会反击，2 表示全部怪兽会反击两次")
     monster_damage_to_player: EWMAData = Field(default_factory=EWMAData, description="平均一个怪兽攻击时，对玩家造成伤害")
     skill_monster_damage_multiplier: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能对特定怪物的伤害倍率。Key 的格式: '{skill_id}@{monster_id}'")
 
