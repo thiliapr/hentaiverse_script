@@ -3,11 +3,12 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-from functools import partial
 import json, pathlib, random, re, argparse, math, time
+from functools import partial
+from abc import ABC, abstractmethod
 from typing import Any, Literal
 from pydantic import BaseModel, Field
-from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError
+from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError, AuthenticationConfig
 
 
 class EWMAData(BaseModel):
@@ -25,13 +26,60 @@ class EWMAData(BaseModel):
         return self.weighted_sum / self.total_weight
 
 
-class SkillData(BaseModel):
-    max_targets: int = Field(1, ge=1, description="技能最大能够攻击到多少个怪兽")
-    damage: EWMAData = Field(default_factory=EWMAData, description="技能的基础伤害")
+class GameData(BaseModel):
+    skill_damage_base: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能的基础伤害值")
+    skill_max_enemies_hit: dict[str, int] = Field(default_factory=dict, description="每个攻击技能最多能同时攻击到的怪兽数量")
+    skill_recovery_amount: dict[str, int] = Field(default_factory=dict, description="生命回复技能的最大回复量")
+    skill_reaction_monsters: dict[str, EWMAData] = Field(default_factory=dict, description="每个动作执行后，会遭到反击的怪兽数量比例。例如值为 0.5 表示一半怪兽会反击，1 表示全部怪兽会反击")
+    monster_damage_to_player: EWMAData = Field(default_factory=EWMAData, description="平均一个怪兽攻击时，对玩家造成伤害")
+    skill_monster_damage_multiplier: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能对特定怪物的伤害倍率。Key 的格式: '{skill_id}@{monster_id}'")
 
 
-class MonsterData(BaseModel):
-    damage_multiplier: dict[str, EWMAData] = Field(default_factory=dict, description="特定技能攻击该怪兽，造成的相对于技能基础伤害的倍数。比如技能基础伤害 1000，相对倍数 1.1，那么计算该技能对怪兽造成的伤害就是 1100")
+class BaseAction(BaseModel, ABC):
+    action_type: Literal["item", "magic", "attack", "defend"]
+    attack_skill: bool = Field(False, description="该技能是否是攻击技能。如果是，则记录该动作造成的伤害")
+    recovery_skill: bool = Field(False, description="该技能是否为生命回复技能。如果是，则记录该动作回复的血量")
+
+    @property
+    @abstractmethod
+    def skill_id(self) -> str:
+        pass
+
+
+class ActionItem(BaseAction):
+    action_type: Literal["item"] = Field("item")
+    item: Item
+
+    @property
+    def skill_id(self) -> str:
+        return f"Item:{self.item.name}"
+
+
+class ActionMagic(BaseAction):
+    action_type: Literal["magic"] = Field("magic")
+    magic: Magic
+    target: int
+
+    @property
+    def skill_id(self) -> str:
+        return f"Magic:{self.magic.name}"
+
+
+class ActionAttack(BaseAction):
+    action_type: Literal["attack"] = Field("attack")
+    target: int
+
+    @property
+    def skill_id(self) -> str:
+        return "Attack"
+
+
+class ActionDefend(BaseAction):
+    action_type: Literal["defend"] = Field("defend")
+
+    @property
+    def skill_id(self) -> str:
+        return "Defend"
 
 
 class BattleBotConfig(BaseModel):
@@ -43,56 +91,28 @@ class BattleBotConfig(BaseModel):
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
     spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
-    avoid_triggering_spark: bool = Field(description="尽量避免触发 Spark of Life Buff，在低血量时尽可能回血而不是等待 Spark of Life 触发。用于减少 Spirit 消耗")
     ewma_multiplier: float = Field(0.99, gt=0, description="EWMA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
 
 
-class AuthenticationConfig(BaseModel):
-    ipb_member_id: str
-    ipb_pass_hash: str
-    user_agent: str | None = None
-
-
-class BaseAction(BaseModel):
-    action_type: Literal["item", "magic", "attack", "defend"]
-    logging_skill_id: str | None = Field(None, description="如果存在，则根据指定的技能 ID 记录该动作造成的伤害")
-
-
-class ActionItem(BaseAction):
-    action_type: Literal["item"] = Field("item")
-    item: Item
-
-
-class ActionMagic(BaseAction):
-    action_type: Literal["magic"] = Field("magic")
-    magic: Magic
-    target: int
-
-
-class ActionAttack(BaseAction):
-    action_type: Literal["attack"] = Field("attack")
-    target: int
-
-
-class ActionDefend(BaseAction):
-    action_type: Literal["defend"] = Field("defend")
-
-
 class BattleBot:
-    def __init__(self, api: BattleAPI, config: BattleBotConfig, skill_data: dict[str, SkillData], monster_data: dict[str, MonsterData]):
+    def __init__(self, api: BattleAPI, config: BattleBotConfig, game_data: GameData):
         self.api = api
         self.config = config
-        self.skill_data = skill_data
-        self.monster_data = monster_data
+        self.game_data = game_data
         self.__init_ewma_multiplier()
         self.__init_flags()
 
     def __init_ewma_multiplier(self):
         for data in [
-            *[x.damage for x in self.skill_data.values()],
-            *[y for x in self.monster_data.values() for y in x.damage_multiplier.values()]
+            *self.game_data.skill_damage_base.values(),
+            *self.game_data.skill_monster_damage_multiplier.values(),
+            *self.game_data.skill_reaction_monsters.values(),
+            self.game_data.monster_damage_to_player
         ]:
             data.multiplier = self.config.ewma_multiplier
+
+    def __new_ewma_data(self) -> EWMAData:
+        return EWMAData(multiplier=self.config.ewma_multiplier)
 
     def __init_flags(self):
         # 检测是否需要结束前回血、是否需要叠回血和回蓝 Buff
@@ -113,16 +133,28 @@ class BattleBot:
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
     def __heal(self, critical: bool) -> BaseAction | None:
+        # 回血净收益 <= 0 时不回血
+        alive_monsters = sum(monster.health > 0 for monster in self.api.monsters)
+        damage_to_player = self.__predict_damage_to_player() * alive_monsters
+
         # 便宜回血
-        action_cure = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID)
+        action_cure = None
+        if self.__predict_recovery_amount("Magic:Cure") > damage_to_player * self.__predict_reaction_ratio("Magic:Cure"):
+            action_cure = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
         if not critical:
             return action_cure
 
         # 紧急、昂贵回血
-        action_full_cure = self.__try_to_use("magic", "Full-Cure", target=BattleAPI.PLAYER_ID)
+        action_full_cure = None
+        if self.__predict_recovery_amount("Magic:Full-Cure") > damage_to_player * self.__predict_reaction_ratio("Magic:Full-Cure"):
+            action_full_cure = self.__try_to_use("magic", "Full-Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
+
+        action_consumable = None
         for item_name in ["Health Gem", "Health Potion"]:
-            if action_consumable := self.__try_to_use("item", item_name):
-                break
+            if self.__predict_recovery_amount(f"Item:{item_name}") > damage_to_player:
+                if action_consumable := self.__try_to_use("item", item_name, recovery_skill=True):
+                    break
+
         return action_full_cure or action_consumable or action_cure
 
     def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
@@ -145,54 +177,107 @@ class BattleBot:
             if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
                 return action
 
-    def __predict_damage(self, skill_id: str, monster: Monster) -> float:
-        if skill_id not in self.skill_data:
+    def __predict_damage_to_monster(self, skill_id: str, monster: Monster) -> float:
+        if skill_id not in self.game_data.skill_damage_base:
             return 19890604
-        skill_base_damage = self.skill_data[skill_id].damage.get_current_average()
+        skill_base_damage = self.game_data.skill_damage_base[skill_id].get_current_average()
 
         multiplier = 1
-        if (monster_data := self.monster_data.get(str(monster.monster_id))) is not None:
-            if skill_id in monster_data.damage_multiplier:
-                multiplier = monster_data.damage_multiplier[skill_id].get_current_average()
+        if (key := f"{skill_id}@{monster.monster_id}") in self.game_data.skill_monster_damage_multiplier:
+            multiplier = self.game_data.skill_monster_damage_multiplier[key].get_current_average()
         return skill_base_damage * multiplier
 
-    def __update_data_after_action(self, action: ActionMagic | ActionAttack, textlog: list[str]):
+    def __predict_recovery_amount(self, skill_id: str) -> int:
+        return self.game_data.skill_recovery_amount.get(skill_id, 19890604)
+
+    def __predict_reaction_ratio(self, skill_id: str) -> float:
+        if skill_id not in self.game_data.skill_reaction_monsters:
+            return 0.
+        return self.game_data.skill_reaction_monsters[skill_id].get_current_average()
+
+    def __predict_damage_to_player(self) -> float:
+        if self.game_data.monster_damage_to_player.total_weight:
+            return self.game_data.monster_damage_to_player.get_current_average()
+        return 0.
+
+    def __update_attack_data(self, action: ActionMagic | ActionAttack, textlog: list[str]):
         # 分析伤害
         damage_info = []
-        for monster_name, damage in BattleAPI.parse_damage(textlog):
+        for monster_name, damage, source in BattleAPI.parse_damage(textlog):
+            if source != "action":
+                continue
             if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(self.api.monsters) if monster.name == monster_name), None)) is not None:
                 monster_id, monster_index = monster_info
                 damage_info.append((monster_index, monster_id, int(damage)))
-
-        # 没有造成任何伤害时跳过数据库更新
         if not damage_info:
-            return textlog
-        monster_indices, _, damage_list = zip(*damage_info)
+            return
 
         # 更新技能数据（伤害和最大攻击范围）
-        skill_data = self.skill_data.setdefault(action.logging_skill_id, SkillData(damage=EWMAData(multiplier=self.config.ewma_multiplier)))
-        skill_data.damage.add_observation(sum(damage_list) / len(damage_list))
-        skill_data.max_targets = max(max(monster_indices) - min(monster_indices), skill_data.max_targets)
+        monster_indices, _, damage_list = zip(*damage_info)
+        self.game_data.skill_damage_base.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(sum(damage_list) / len(damage_list))
+        self.game_data.skill_max_enemies_hit[action.skill_id] = max(max(monster_indices) - min(monster_indices) + 1, self.game_data.skill_max_enemies_hit.get(action.skill_id, 1))
 
         # 更新怪兽数据，用技能基础伤害的倍数表示
-        skill_base_damage = skill_data.damage.get_current_average()
+        skill_base_damage = self.game_data.skill_damage_base[action.skill_id].get_current_average()
         for _, monster_id, damage in damage_info:
-            self.monster_data.setdefault(monster_id, MonsterData()).damage_multiplier.setdefault(action.logging_skill_id, EWMAData(multiplier=self.config.ewma_multiplier)).add_observation(damage / skill_base_damage)
+            self.game_data.skill_monster_damage_multiplier.setdefault(f"{action.skill_id}@{monster_id}", self.__new_ewma_data()).add_observation(damage / skill_base_damage)
 
-        return textlog
+    def __update_recovery_data(self, action: ActionMagic | ActionItem, textlog: list[str]):
+        # 捕获有回复生命的记录
+        health_restored = None
+        for log in textlog:
+            if res := re.search(r"Recovered (\d+) points of health", log):
+                health_restored = res.group(1)
+            elif res := re.search(r"You are healed for (\d+) Health Points", log):
+                health_restored = res.group(1)
+
+        # 更新数据
+        if not health_restored:
+            print("[battle_bot.BattleBot.__update_recovery_data] [TextLogReplay] ===== Begin of Replay ===")
+            print("\n".join(textlog))
+            print("[battle_bot.BattleBot.__update_recovery_data] [TextLogReplay] ===== End of Replay ===")
+            raise RuntimeError("使用了回复魔法/物品，却找不到回复记录。这意味着存在回复记录规则的遗漏，请联系作者并把上面的记录发给作者修复（或者你自己加上去）")
+
+        health_restored = int(health_restored)
+        self.game_data.skill_recovery_amount[action.skill_id] = max(health_restored, self.game_data.skill_recovery_amount.get(action.recovery_skill, 0))
+
+    def __update_monster_damage(self, action: BaseAction, textlog: list[str]):
+        total_damage = 0
+        damage_count = 0
+        for log in textlog:
+            # 获取伤害
+            damage = None
+            if res := re.search(r".+ [a-z]+s you for (\d+) \w+ damage", log):
+                damage = res.group(1)
+            elif res := re.search(r".+ uses .+, and [a-z]+s you for (\d+) \w+ damage", log):
+                damage = res.group(1)
+            elif res := re.search(r".+ [a-z]+s you, causing (\d+) points of \w+ damage", log):
+                damage = res.group(1)
+            elif res := re.search(r".+ [a-z]+s .+, which [a-z]+s! You( resist the attack, and)? take (\d+) \w+ damage", log):
+                damage = res.group(2)
+            # 累积计算平均伤害
+            if damage:
+                total_damage += int(damage)
+                damage_count += 1
+
+        # 更新数据
+        if alive_monsters := sum(monster.health > 0 for monster in self.api.monsters):
+            self.game_data.skill_reaction_monsters.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(damage_count / alive_monsters)
+        if damage_count:
+            self.game_data.monster_damage_to_player.add_observation(total_damage / damage_count)
 
     def __analyze_score(self, skill_id: str, monster_idx: int, mana_cost: int) -> tuple:
         # 获取攻击窗口。以目标为中心，尽量保持对称（多出一个就给左侧），左右两侧最多各取 ceil((max_targets-1)/2) 个目标，总数量不超过 max_targets
         # 示例（max_targets=6，T 代表 Target）: [T B C D] E F G H; A [B C D T F G] H; A B C D [E F G T]
         # 你问我为什么这个窗口是这个逻辑？我咋知道，我就是个写外挂的，这个问题得问游戏开发者去
-        max_targets = self.skill_data[skill_id].max_targets if skill_id in self.skill_data else 1
+        max_targets = self.game_data.skill_max_enemies_hit.get(skill_id, 1)
         targets_up = min(monster_idx, math.ceil((max_targets - 1) / 2))
         targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
         window = list(enumerate(self.api.monsters))[monster_idx - targets_up:monster_idx + targets_down + 1]
         window = [(idx, monster) for idx, monster in window if monster.health > 0]
 
         # 从历史数据预测伤害，计算指标
-        raw_damage_dealt = {idx: self.__predict_damage(skill_id, monster) for idx, monster in window}
+        raw_damage_dealt = {idx: self.__predict_damage_to_monster(skill_id, monster) for idx, monster in window}
         actual_damage_taken = {idx: min(damage, self.api.monsters[idx].health) for idx, damage in raw_damage_dealt.items()}
         will_die = sum(actual_damage_taken.get(idx, 0) >= monster.health for idx, monster in window)
         kill_deficit = 0
@@ -242,9 +327,12 @@ class BattleBot:
         elif action.action_type == "magic":
             textlog = self.api.use_magic(action.magic, action.target)
 
-        # 记录伤害
-        if action.logging_skill_id:
-            self.__update_data_after_action(action, textlog)
+        # 更新数据
+        self.__update_monster_damage(action, textlog)
+        if action.attack_skill:
+            self.__update_attack_data(action, textlog)
+        if action.recovery_skill:
+            self.__update_recovery_data(action, textlog)
 
         return textlog
 
@@ -265,14 +353,13 @@ class BattleBot:
             if action := self.__try_to_use("item", "Spirit Potion"):
                 return [(action, 0)]
 
-        # 如果没有保命 Buff，就分情况进行急救回血和普通回血
-        if self.config.avoid_triggering_spark or not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
-            if self.api.get_player_health() < self.config.critical_health_line:
-                if action := self.__heal(critical=True):
-                    return [(action, 0)]
-            if self.api.get_player_health() < self.config.normal_healing_line:
-                if action := self.__heal(critical=False):
-                    return [(action, 0)]
+        # 分情况进行急救回血和普通回血
+        if self.api.get_player_health() < self.config.critical_health_line:
+            if action := self.__heal(critical=True):
+                return [(action, 0)]
+        if self.api.get_player_health() < self.config.normal_healing_line:
+            if action := self.__heal(critical=False):
+                return [(action, 0)]
 
         # 丢弃无用物品
         for item_name in ["Mystic Gem", "Spirit Gem"]:
@@ -333,29 +420,35 @@ class BattleBot:
                     continue
 
                 # 获取分数，并添加进候选人名单
-                skill_id = f"Magic/{magic.name}"
-                score = self.__analyze_score(skill_id, monster_idx, magic.mana_cost)
-                action_scores.append((ActionMagic(magic=magic, target=attack_target, logging_skill_id=skill_id), score))
+                score = self.__analyze_score(f"Magic:{magic.name}", monster_idx, magic.mana_cost)
+                action_scores.append((ActionMagic(magic=magic, target=attack_target, attack_skill=True), score))
 
             # 获取普通攻击情况
-            skill_id = f"Attack/Attack"
-            score = self.__analyze_score(skill_id, monster_idx, 0)
-            action_scores.append((ActionAttack(target=attack_target, logging_skill_id=skill_id), score))
+            score = self.__analyze_score("Attack", monster_idx, 0)
+            action_scores.append((ActionAttack(target=attack_target, attack_skill=True), score))
 
         # 返回可用动作
         if action_scores:
             return action_scores
 
 
-def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None = None) -> BattleResult:
-    # 加载战斗数据和配置文件
-    root_dir = pathlib.Path("world/persistent")
-    if isekai:
-        root_dir = pathlib.Path("world/isekai")
-    root_dir.mkdir(parents=True, exist_ok=True)
+def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: dict[str, Any] | None = None) -> BattleResult:
+    # 初始化档案
+    root_dir = pathlib.Path("world") / ("isekai" if isekai else "persistent")
+    config_path, game_data_path, monster_damage_to_player_path = [root_dir / f"{name}.json" for name in ["config", "game_data", f"monster_damage_to_player [level={difficult_level}]"]]
+    if not all(path.exists() for path in [config_path, game_data_path]):
+        game_data = GameData().model_dump()
+        game_data.pop("monster_damage_to_player")
 
-    all_skill_data, all_monster_data, config = [json.loads((root_dir / pathlib.Path(f"{name}.json")).read_text("utf-8")) for name in ["skill_data", "monster_data", "config"]]
-    all_skill_data, all_monster_data = [{k: data_class.model_validate(v) for k, v in data.items()} for data, data_class in [(all_skill_data, SkillData), (all_monster_data, MonsterData)]]
+        root_dir.mkdir(parents=True, exist_ok=True)
+        game_data_path.write_text(json.dumps(game_data, indent=2))
+        print(f"[BattleBot.battle] 检测到不存在 {root_dir} 档案，已初始化档案")
+
+    # 加载战斗数据和配置文件
+    config, game_data, monster_damage_to_player = [json.loads(path.read_text("utf-8")) if path.exists() else None for path in [config_path, game_data_path, monster_damage_to_player_path]]
+    game_data["monster_damage_to_player"] = EWMAData().model_dump()
+    if monster_damage_to_player:
+        game_data["monster_damage_to_player"] = monster_damage_to_player
 
     # 创建 API
     auth_config = AuthenticationConfig.model_validate(config["authentication"])
@@ -370,9 +463,10 @@ def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None 
 
     # 创建 Battle Bot
     battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
+    game_data = GameData.model_validate(game_data)
     for k, v in (config_override or {}).items():
         setattr(battle_bot_config, k, v)
-    battle_bot = BattleBot(api, battle_bot_config, all_skill_data, all_monster_data)
+    battle_bot = BattleBot(api, battle_bot_config, game_data)
 
     # 使用 Battle Bot 预测并执行动作
     last_execution_time = 0
@@ -383,10 +477,10 @@ def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None 
 
         # 仅在多个可用动作时打印信息
         if len(actions) > 1:
-            print(f"[battle_bot.battle] 最佳动作: skill={best_action.logging_skill_id}; target={best_action.target}; score={best_score}")
+            print(f"[battle_bot.battle] 最佳动作: skill={best_action.skill_id}; target={best_action.target}; score={best_score}")
             if random.random() < epsilon:
                 action, score = random.choice(actions)
-                print(f"[battle_bot.battle] [随机探索] 随机选择动作: skill={best_action.logging_skill_id}; target={action.target}; score={score}")
+                print(f"[battle_bot.battle] [随机探索] 随机选择动作: skill={action.skill_id}; target={action.target}; score={score}")
 
         # 控制频率并执行动作
         # To prevent botting and overloading the server there is a server side restriction which prevents more than 4 turns per second.
@@ -397,8 +491,10 @@ def battle(isekai: bool, epsilon: float, config_override: dict[str, Any] | None 
         last_execution_time = time.time()
 
     # 保存战斗数据
-    for data, prefix, indent, separators in [(all_skill_data, "skill", "\t", None), (all_monster_data, "monster", None, (",", ":"))]:
-        (root_dir / pathlib.Path(f"{prefix}_data.json")).write_text(json.dumps({k: v.model_dump() for k, v in data.items()}, indent=indent, separators=separators), encoding="utf-8")
+    game_data = game_data.model_dump()
+    monster_damage_to_player = game_data.pop("monster_damage_to_player")
+    for data, prefix in [(game_data, "game_data"), (monster_damage_to_player, f"monster_damage_to_player [level={difficult_level}]")]:
+        (root_dir / pathlib.Path(f"{prefix}.json")).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     return api.battle_result
 
@@ -408,11 +504,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-i", "--isekai", action="store_true", help="游戏分两个模式: Persistent 和 Isekai。指定该 flag 以进行异世界的战斗")
     parser.add_argument("-e", "--epsilon", type=float, default=0., help="随机探索率，越大越激进，越小越保守")
     parser.add_argument("-l", "--loop", action="store_true", help="一直尝试进行战斗，直到找不到战斗")
+    parser.add_argument("-d", "--difficult-level", default="default", help="这场战斗的难度等级。这会影响怪兽对玩家伤害的预测")
     return parser.parse_args(args)
 
 
 def main(args: argparse.Namespace):
-    battle_func = partial(battle, args.isekai, args.epsilon)
+    battle_func = partial(battle, args.isekai, args.epsilon, args.difficult_level)
     if args.loop:
         try:
             while True:

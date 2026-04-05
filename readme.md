@@ -35,8 +35,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "spirit_supply_line": -1,
            "pre_battle_health_reserve": 200,
            "pre_battle_mana_reserve": 20,
-           "spark_trigger_spirit": 19890604,
-           "avoid_triggering_spark": true
+           "spark_trigger_spirit": 19890604
        },
        "task_bot": {
            "market_bot": {
@@ -48,10 +47,8 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            },
            "battle_bot_override": {
                "encounter": {
-                   "avoid_triggering_spark": false
                },
                "arena": {
-                   "avoid_triggering_spark": true
                }
            },
            "encounter_difficult_level": "3",
@@ -60,10 +57,6 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "training_henjutsu": ["Adept Learner", "Assimilator", "Scavenger", "Quartermaster", "Luck of the Draw", "Archaeologist"]
        }
    }
-   ```
-2. 创建文件`world/persistent/skill_data.json`和`world/persistent/monster_data.json`，内容如下
-   ```json
-   {}
    ```
 3. 运行`python task_bot.py`，大功告成
 

@@ -5,7 +5,7 @@
 
 import re
 import enum
-from typing import Any
+from typing import Any, Literal
 from collections.abc import Callable
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -58,6 +58,12 @@ class TokenNotFoundError(Exception):
         self.page = page
 
 
+class AuthenticationConfig(BaseModel):
+    ipb_member_id: str
+    ipb_pass_hash: str
+    user_agent: str | None = None
+
+
 class BattleAPI:
     PLAYER_ID = 0
     MONSTER_START_ID = 1
@@ -79,7 +85,7 @@ class BattleAPI:
         self.logs = [initial_logs]
 
         # 解析获取怪兽信息，按怪物出场的顺序排序，A 最先出场，B 第二个出场，以此类推
-        monsters_info = sorted([x.groups() for x in [re.search(r"Spawned Monster ([A-Z]): MID=([0-9]+) \(([^)]+)\) LV=(\d+) HP=(\d+)", log) for log in initial_logs] if x is not None], key=lambda x: x[0])
+        monsters_info = sorted([x.groups() for x in [re.search(r"Spawned Monster ([A-Z]): MID=([0-9]+) \(([^)]+)\) LV=(\d+) HP=(\d+)", log) for log in initial_logs] if x], key=lambda x: x[0])
         self.monsters = [Monster(name=name, monster_id=monster_id, level=level, health=health) for _, monster_id, name, level, health in monsters_info]
         self.__update_monster_info()
 
@@ -162,7 +168,7 @@ class BattleAPI:
         # 解析怪兽受到的伤害，并相应地更新怪兽的生命值
         # 你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.monsters)}
-        for monster_name, damage in BattleAPI.parse_damage(textlog):
+        for monster_name, damage, _ in BattleAPI.parse_damage(textlog):
             # 更新怪兽生命值
             if monster_name in monster_name_to_idx:
                 monster = self.monsters[monster_name_to_idx[monster_name]]
@@ -210,27 +216,27 @@ class BattleAPI:
         return Effect(name=name, description=description, remaining_turns=remaining_turns)
 
     @staticmethod
-    def parse_damage(logs: list[str]) -> list[tuple[str, int]]:
+    def parse_damage(logs: list[str]) -> list[tuple[str, int, Literal["action", "effect"]]]:
         damages = []
         for log in logs:
-            monster_name = damage = None
+            monster_name = damage = source = None
             # Natsuiro Matsuri resists, and was glanced for 8964 Seiso damage.
             # 你问我为什么 resists 前的不是可选的？游戏就是这么显示的（"Natsuiro Matsuri  was glanced for 8964 Seiso damage."，有两个空格），我觉得这是游戏记录的 bug
-            if (res := re.search(r"(.+?) (resists, and)? was \w+ for (\d+) \w+ damage", log)) is not None:
-                monster_name, _, damage = res.groups()
+            if res := re.search(r"(.+?) (resists, and)? was \w+ for (\d+) \w+ damage", log):
+                (monster_name, _, damage), source = res.groups(), "action"
             # Smite hits Natsuiro Matsuri for 19890604 seiso damage.
-            elif (res := re.search(r"[\w ]+ [a-z]+s (.+) for (\d+) (\w+ )?damage", log)) is not None:
-                monster_name, damage, _ = res.groups()
+            elif res := re.search(r"[\w ]+ [a-z]+s (.+) for (\d+) (\w+ )?damage", log):
+                (monster_name, damage, _), source = res.groups(), "action"
             # Arcane Blow hits Natsuiro Matsuri, which partially parries, causing 114514 points of Seiso damage.
-            elif (res := re.search(r"[\w ]+ [a-z]+s (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log)) is not None:
-                monster_name, _, damage = res.groups()
+            elif res := re.search(r"[\w ]+ [a-z]+s (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log):
+                (monster_name, _, damage), source = res.groups(), "action"
             # You drain 1919810 points of health from Natsuiro Matsuri.
-            elif (res := re.search(r"You drain (\d)+ points of health from (.+).", log)) is not None:
-                damage, monster_name = res.groups()
+            elif res := re.search(r"You drain (\d)+ points of health from (.+).", log):
+                (damage, monster_name), source = res.groups(), "effect"
 
             # 添加解析结果到伤害列表
-            if monster_name and damage:
-                damages.append((monster_name, int(damage)))
+            if monster_name:
+                damages.append((monster_name, int(damage), source))
 
         return damages
 
@@ -248,7 +254,7 @@ class BattleAPI:
 
     def get_player_health(self) -> int:
         # 处于 Spark of Life 效果时，血量 ID 会变成 vrhd
-        if (health := self.__get_player_vital(["vrhb", "vrhd"])) is not None:
+        if health := self.__get_player_vital(["vrhb", "vrhd"]):
             return health
         # 在 Standard UI 下，血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
         return 1
@@ -268,7 +274,7 @@ class BattleAPI:
         magic_skills = []
 
         for row in self.__containers["table_magic"].find_all("tr"):
-            if (category_img := row.find("img")) is not None:
+            if category_img := row.find("img"):
                 current_category = category_img.attrs["alt"]
                 continue
             # 你知道吗，每一行都有 [1, 2] 个魔法，这混乱程度……

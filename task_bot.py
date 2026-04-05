@@ -282,7 +282,7 @@ def main():
 
         try:
             while True:
-                battle_result = battle_with_skip_riddle(False, epsilon, config_override)
+                battle_result = battle_with_skip_riddle(False, epsilon, difficult_level, config_override)
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
