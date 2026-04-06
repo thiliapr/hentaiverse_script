@@ -30,7 +30,7 @@ class GameData(BaseModel):
     skill_damage_base: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能的基础伤害值")
     skill_max_enemies_hit: dict[str, int] = Field(default_factory=dict, description="每个攻击技能最多能同时攻击到的怪兽数量")
     skill_recovery_amount: dict[str, int] = Field(default_factory=dict, description="生命回复技能的最大回复量")
-    skill_reaction_monsters: dict[str, EWMAData] = Field(default_factory=dict, description="每个动作执行后，会遭到反击的怪兽数量比例。例如值为 0.5 表示一半怪兽会反击，1 表示全部怪兽会反击，2 表示全部怪兽会反击两次")
+    skill_reaction_monsters_ratio: dict[str, EWMAData] = Field(default_factory=dict, description="每个动作执行后，会遭到反击的怪兽数量比例。例如值为 0.5 表示一半怪兽会反击，1 表示全部怪兽会反击，2 表示全部怪兽会反击两次")
     monster_damage_to_player: EWMAData = Field(default_factory=EWMAData, description="平均一个怪兽攻击时，对玩家造成伤害")
     skill_monster_damage_multiplier: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能对特定怪物的伤害倍率。Key 的格式: '{skill_id}@{monster_id}'")
 
@@ -106,7 +106,7 @@ class BattleBot:
         for data in [
             *self.game_data.skill_damage_base.values(),
             *self.game_data.skill_monster_damage_multiplier.values(),
-            *self.game_data.skill_reaction_monsters.values(),
+            *self.game_data.skill_reaction_monsters_ratio.values(),
             self.game_data.monster_damage_to_player
         ]:
             data.multiplier = self.config.ewma_multiplier
@@ -133,27 +133,22 @@ class BattleBot:
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
     def __heal(self, critical: bool) -> BaseAction | None:
-        # 回血净收益 <= 0 时不回血
-        alive_monsters = sum(monster.health > 0 for monster in self.api.monsters)
-        damage_to_player = self.__predict_damage_to_player() * alive_monsters
-
         # 便宜回血
         action_cure = None
-        if self.__predict_recovery_amount("Magic:Cure") > damage_to_player * self.__predict_reaction_ratio("Magic:Cure"):
+        if self.__predict_recovery_amount("Magic:Cure") > self.__predict_damage_to_player("Magic:Cure"):
             action_cure = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
         if not critical:
             return action_cure
 
         # 紧急、昂贵回血
         action_full_cure = None
-        if self.__predict_recovery_amount("Magic:Full-Cure") > damage_to_player * self.__predict_reaction_ratio("Magic:Full-Cure"):
+        if self.__predict_recovery_amount("Magic:Full-Cure") > self.__predict_damage_to_player("Magic:Full-Cure"):
             action_full_cure = self.__try_to_use("magic", "Full-Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
 
         action_consumable = None
         for item_name in ["Health Gem", "Health Potion"]:
-            if self.__predict_recovery_amount(f"Item:{item_name}") > damage_to_player:
-                if action_consumable := self.__try_to_use("item", item_name, recovery_skill=True):
-                    break
+            if action_consumable := self.__try_to_use("item", item_name, recovery_skill=True):
+                break
 
         return action_full_cure or action_consumable or action_cure
 
@@ -178,27 +173,26 @@ class BattleBot:
                 return action
 
     def __predict_damage_to_monster(self, skill_id: str, monster: Monster) -> float:
-        if skill_id not in self.game_data.skill_damage_base:
+        if skill_id not in (database := self.game_data.skill_damage_base):
             return 19890604
-        skill_base_damage = self.game_data.skill_damage_base[skill_id].get_current_average()
+        skill_base_damage = database[skill_id].get_current_average()
 
         multiplier = 1
-        if (key := f"{skill_id}@{monster.monster_id}") in self.game_data.skill_monster_damage_multiplier:
-            multiplier = self.game_data.skill_monster_damage_multiplier[key].get_current_average()
+        if (key := f"{skill_id}@{monster.monster_id}") in (database := self.game_data.skill_monster_damage_multiplier):
+            multiplier = database[key].get_current_average()
         return skill_base_damage * multiplier
 
     def __predict_recovery_amount(self, skill_id: str) -> int:
         return self.game_data.skill_recovery_amount.get(skill_id, 19890604)
 
-    def __predict_reaction_ratio(self, skill_id: str) -> float:
-        if skill_id not in self.game_data.skill_reaction_monsters:
-            return 0.
-        return self.game_data.skill_reaction_monsters[skill_id].get_current_average()
-
-    def __predict_damage_to_player(self) -> float:
-        if self.game_data.monster_damage_to_player.total_weight:
-            return self.game_data.monster_damage_to_player.get_current_average()
-        return 0.
+    def __predict_damage_to_player(self, skill_id: str) -> float:
+        reaction_monsters_ratio = each_damage = 0.
+        alive_monsters = sum(monster.health > 0 for monster in self.api.monsters)
+        if skill_id in (database := self.game_data.skill_reaction_monsters_ratio):
+            reaction_monsters_ratio = database[skill_id].get_current_average()
+        if (database := self.game_data.monster_damage_to_player).total_weight:
+            each_damage = database.get_current_average()
+        return alive_monsters * reaction_monsters_ratio * each_damage
 
     def __update_attack_data(self, action: ActionMagic | ActionAttack, textlog: list[str]):
         # 分析伤害
@@ -262,7 +256,7 @@ class BattleBot:
 
         # 更新数据
         if alive_monsters := sum(monster.health > 0 for monster in self.api.monsters):
-            self.game_data.skill_reaction_monsters.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(damage_count / alive_monsters)
+            self.game_data.skill_reaction_monsters_ratio.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(damage_count / alive_monsters)
         if damage_count:
             self.game_data.monster_damage_to_player.add_observation(total_damage / damage_count)
 
@@ -385,8 +379,8 @@ class BattleBot:
                             return [(action, 0)]
                     return [(ActionDefend(), 0)]
 
-        # 如果 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
-        if self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+        # 如果可以撑过这回合，并且 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
+        if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
             if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
                 return [(action, 0)]
 
