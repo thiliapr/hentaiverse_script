@@ -91,6 +91,7 @@ class BattleBotConfig(BaseModel):
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
     spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
+    prof_mana_threshold: int = Field(ge=0, description="刷技能熟练度的蓝量门槛。高于此值则用非伤害技能刷熟练度，低于则直接攻击结束战斗")
     ewma_multiplier: float = Field(0.99, gt=0, description="EWMA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
 
 
@@ -127,50 +128,6 @@ class BattleBot:
     @staticmethod
     def __has_effect(effect_name: str, effects: list[Effect]) -> bool:
         return any(effect.name == effect_name for effect in effects)
-
-    def __try_to_use(self, category: Literal["magic", "item"], name: str, **kwargs) -> ActionItem | ActionMagic | None:
-        if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
-            return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
-
-    def __heal(self, critical: bool) -> BaseAction | None:
-        # 便宜回血
-        action_cure = None
-        if self.__predict_recovery_amount("Magic:Cure") > self.__predict_damage_to_player("Magic:Cure"):
-            action_cure = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
-        if not critical:
-            return action_cure
-
-        # 紧急、昂贵回血
-        action_full_cure = None
-        if self.__predict_recovery_amount("Magic:Full-Cure") > self.__predict_damage_to_player("Magic:Full-Cure"):
-            action_full_cure = self.__try_to_use("magic", "Full-Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
-
-        action_consumable = None
-        for item_name in ["Health Gem", "Health Potion"]:
-            if action_consumable := self.__try_to_use("item", item_name, recovery_skill=True):
-                break
-
-        return action_full_cure or action_consumable or action_cure
-
-    def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
-        control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
-        if with_sleep:
-            control_magic_and_effect.insert(0, ("Sleep", "Asleep"))
-
-        # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
-        best_effect = control_magic_and_effect[0][1]
-        monster = self.api.monsters[monster_idx]
-        if BattleBot.__has_effect(best_effect, monster.effects):
-            return
-
-        # 按顺序施展控制效果
-        for magic_name, effect_name in control_magic_and_effect:
-            # 怪兽已经有这个 Debuff 就不用叠了，叠下一个
-            if BattleBot.__has_effect(effect_name, monster.effects):
-                continue
-            # 给怪兽叠 Debuff
-            if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
-                return action
 
     def __predict_damage_to_monster(self, skill_id: str, monster: Monster) -> float:
         if skill_id not in (database := self.game_data.skill_damage_base):
@@ -282,6 +239,83 @@ class BattleBot:
 
         return will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
 
+    def __try_to_use(self, category: Literal["magic", "item"], name: str, **kwargs) -> ActionItem | ActionMagic | None:
+        if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
+            return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
+
+    def __heal(self, critical: bool) -> BaseAction | None:
+        # 便宜回血
+        action_cure = None
+        if self.__predict_recovery_amount("Magic:Cure") > self.__predict_damage_to_player("Magic:Cure"):
+            action_cure = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
+        if not critical:
+            return action_cure
+
+        # 紧急、昂贵回血
+        action_full_cure = None
+        if self.__predict_recovery_amount("Magic:Full-Cure") > self.__predict_damage_to_player("Magic:Full-Cure"):
+            action_full_cure = self.__try_to_use("magic", "Full-Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
+
+        action_consumable = None
+        for item_name in ["Health Gem", "Health Potion"]:
+            if action_consumable := self.__try_to_use("item", item_name, recovery_skill=True):
+                break
+
+        return action_full_cure or action_consumable or action_cure
+
+    def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
+        control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
+        if with_sleep:
+            control_magic_and_effect.insert(0, ("Sleep", "Asleep"))
+
+        # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
+        best_effect = control_magic_and_effect[0][1]
+        monster = self.api.monsters[monster_idx]
+        if BattleBot.__has_effect(best_effect, monster.effects):
+            return
+
+        # 按顺序施展控制效果
+        for magic_name, effect_name in control_magic_and_effect:
+            # 怪兽已经有这个 Debuff 就不用叠了，叠下一个
+            if BattleBot.__has_effect(effect_name, monster.effects):
+                continue
+            # 给怪兽叠 Debuff
+            if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
+                return action
+
+    def __heal_before_end(self) -> BaseAction | None:
+        # 仅当战场只存在一个怪兽时使用
+        if self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
+            # 给敌人打麻药
+            if action := self.__control_monster(next(idx for idx, monster in enumerate(self.api.monsters) if monster.health), with_sleep=True):
+                return [(action, 0)]
+
+            # 尝试回血到期望值
+            if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)):
+                return [(action, 0)]
+
+            # 尝试回蓝到期望值
+            if self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
+                for item_name in ["Mana Gem", "Mana Potion"]:
+                    if action := self.__try_to_use("item", item_name):
+                        return [(action, 0)]
+                return [(ActionDefend(), 0)]
+
+
+    def __grind_proficiency(self) -> BaseAction:
+        # 仅当战场只存在一个怪兽时使用
+        monster_idx = next(idx for idx, monster in enumerate(self.api.monsters) if monster.health)
+
+        # 给敌人打麻药
+        if action := self.__control_monster(monster_idx, with_sleep=True):
+            return [(action, 0)]
+
+        # 尝试回血到期望值
+        if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)):
+            return [(action, 0)]
+
+        return ActionDefend()
+
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
         def format_effects_str(effects: list[Effect]) -> str:
@@ -360,24 +394,13 @@ class BattleBot:
             if action := self.__try_to_use("item", item_name):
                 return [(action, 0)]
 
-        # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
-        alive_monsters = [idx for idx, monster in enumerate(self.api.monsters) if monster.health]
-        if len(alive_monsters) == 1:
-            if self.heal_before_end_flag and ((self.api.get_player_health() < self.config.pre_battle_health_reserve and not self.__has_effect("Spark of Life", self.api.get_player_effects())) or self.api.get_player_mana() < self.config.pre_battle_mana_reserve):
-                # 给敌人打麻药
-                if action := self.__control_monster(alive_monsters[0], with_sleep=True):
-                    return [(action, 0)]
-
-                # 尝试回血到期望值
-                if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)):
-                    return [(action, 0)]
-
-                # 尝试回蓝到期望值
-                if self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
-                    for item_name in ["Mana Gem", "Mana Potion"]:
-                        if action := self.__try_to_use("item", item_name):
-                            return [(action, 0)]
-                    return [(ActionDefend(), 0)]
+        if len(idx for idx, monster in enumerate(self.api.monsters) if monster.health) == 1:
+            # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
+            if self.heal_before_end_flag and (action := self.__heal_before_end()):
+                return action
+            # 耍戏，提升属性熟练度
+            elif self.api.get_player_mana() > self.config.prof_mana_threshold:
+                return self.__grind_proficiency()
 
         # 如果可以撑过这回合，并且 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
         if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
