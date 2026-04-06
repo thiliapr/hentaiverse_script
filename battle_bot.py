@@ -302,11 +302,8 @@ class BattleBot:
                 return [(ActionDefend(), 0)]
 
     def __grind_proficiency(self) -> BaseAction:
-        # 仅当战场只存在一个怪兽时使用
-        monster_idx = next(idx for idx, monster in enumerate(self.api.monsters) if monster.health)
-
         # 给敌人打麻药
-        if action := self.__control_monster(monster_idx, with_sleep=True):
+        if action := self.__control_monster(next(idx for idx, monster in enumerate(self.api.monsters) if monster.health), with_sleep=True):
             return [(action, 0)]
 
         # 尝试回血到期望值
