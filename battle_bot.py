@@ -301,7 +301,6 @@ class BattleBot:
                         return [(action, 0)]
                 return [(ActionDefend(), 0)]
 
-
     def __grind_proficiency(self) -> BaseAction:
         # 仅当战场只存在一个怪兽时使用
         monster_idx = next(idx for idx, monster in enumerate(self.api.monsters) if monster.health)
@@ -394,7 +393,7 @@ class BattleBot:
             if action := self.__try_to_use("item", item_name):
                 return [(action, 0)]
 
-        if len(idx for idx, monster in enumerate(self.api.monsters) if monster.health) == 1:
+        if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
             if self.heal_before_end_flag and (action := self.__heal_before_end()):
                 return action
