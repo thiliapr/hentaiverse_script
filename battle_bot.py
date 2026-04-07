@@ -321,17 +321,19 @@ class BattleBot:
                         return action
                 return ActionDefend()
 
-    def __grind_proficiency(self) -> BaseAction:
+    def __grind_proficiency(self) -> BaseAction | None:
         # https://ehwiki.org/wiki/Proficiencies
-        for attr, action in [
+        attr_actinos = [
             ("deprecating", self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True)),
             ("supportive", self.__heal(critical=False))
-        ]:
+        ]
+        for attr, action in attr_actinos:
             if attr not in self.__grind_proficiency_attrs and action:
                 self.__grind_proficiency_attrs.add(attr)
                 return action
 
-        return ActionDefend()
+        if any(attr not in self.__grind_proficiency_attrs for attr, _ in attr_actinos):
+            return ActionDefend()
 
     def __auto_attack(self) -> list[tuple[BaseAction, tuple]]:
         # 获取各个目标的普通攻击、魔法分数
@@ -442,8 +444,8 @@ class BattleBot:
                 if (action := self.__heal_before_end()):
                     return [(action, 0)]
             # 耍戏，提升属性熟练度
-            elif self.api.get_player_mana() > self.config.prof_mana_threshold:
-                return [(self.__grind_proficiency(), 0)]
+            elif self.api.get_player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
+                return [(action, 0)]
 
         # 如果可以撑过这回合，并且 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
         if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
