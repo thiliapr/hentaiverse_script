@@ -102,6 +102,7 @@ class BattleBot:
         self.game_data = game_data
         self.__init_ewma_multiplier()
         self.__init_flags()
+        self.__grind_proficiency_attrs = set()
 
     def __init_ewma_multiplier(self):
         for data in [
@@ -321,18 +322,13 @@ class BattleBot:
                 return ActionDefend()
 
     def __grind_proficiency(self) -> BaseAction:
-        # 回蓝 Buff
-        if not BattleBot.__has_effect("Replenishment", self.api.get_player_effects()) and (action := self.__try_to_use("item", "Mana Draught")):
-            return action
-
-        # 低血量时，睡眠 + 回血，练 Supportive 和 Staff 熟练度; 高血量时，挨打，练 Armor 熟练度
-        if self.api.get_player_health() < self.config.pre_battle_health_reserve:
-            if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
-                return action
-            if action := self.__heal(critical=False):
-                return action
-        else:
-            if not self.__has_effect("Asleep", self.__get_alive_monsters()[0][1].effects) and (action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=False)):
+        # https://ehwiki.org/wiki/Proficiencies
+        for attr, action in [
+            ("deprecating", self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True)),
+            ("supportive", self.__heal(critical=False))
+        ]:
+            if attr not in self.__grind_proficiency_attrs and action:
+                self.__grind_proficiency_attrs.add(attr)
                 return action
 
         return ActionDefend()
