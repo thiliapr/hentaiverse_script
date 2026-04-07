@@ -129,6 +129,9 @@ class BattleBot:
     def __has_effect(effect_name: str, effects: list[Effect]) -> bool:
         return any(effect.name == effect_name for effect in effects)
 
+    def __get_alive_monsters(self) -> list[tuple[int, Monster]]:
+        return [(idx, monster) for idx, monster in enumerate(self.api.monsters) if monster.health]
+
     def __predict_damage_to_monster(self, skill_id: str, monster: Monster) -> float:
         if skill_id not in (database := self.game_data.skill_damage_base):
             return 19890604
@@ -144,7 +147,7 @@ class BattleBot:
 
     def __predict_damage_to_player(self, skill_id: str) -> float:
         reaction_monsters_ratio = each_damage = 0.
-        alive_monsters = sum(monster.health > 0 for monster in self.api.monsters)
+        alive_monsters = len(self.__get_alive_monsters())
         if skill_id in (database := self.game_data.skill_reaction_monsters_ratio):
             reaction_monsters_ratio = database[skill_id].get_current_average()
         if (database := self.game_data.monster_damage_to_player).total_weight:
@@ -212,7 +215,7 @@ class BattleBot:
                 damage_count += 1
 
         # 更新数据
-        if alive_monsters := sum(monster.health > 0 for monster in self.api.monsters):
+        if alive_monsters := len(self.__get_alive_monsters()):
             self.game_data.skill_reaction_monsters_ratio.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(damage_count / alive_monsters)
         if damage_count:
             self.game_data.monster_damage_to_player.add_observation(total_damage / damage_count)
@@ -283,34 +286,81 @@ class BattleBot:
             if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
                 return action
 
+    def __boss_debuff(self, bosses: list[int]) -> BaseAction | None:
+        for monster_idx in bosses:
+            # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
+            if action := self.__control_monster(monster_idx, with_sleep=False):
+                return action
+
+        # 如果所有怪兽都被叠了控制 Debuff，那么就给他们叠破防 Debuff
+        if not all(BattleBot.__has_effect("Silenced", self.api.monsters[idx].effects) for idx in bosses):
+            return
+
+        for monster_idx in bosses:
+            if BattleBot.__has_effect("Imperiled", self.api.monsters[monster_idx].effects):
+                continue
+            if action := self.__try_to_use("magic", "Imperil", target=BattleAPI.MONSTER_START_ID + monster_idx):
+                return action
+
     def __heal_before_end(self) -> BaseAction | None:
         # 仅当战场只存在一个怪兽时使用
         if self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
             # 给敌人打麻药
-            if action := self.__control_monster(next(idx for idx, monster in enumerate(self.api.monsters) if monster.health), with_sleep=True):
-                return [(action, 0)]
+            if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
+                return action
 
             # 尝试回血到期望值
             if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)):
-                return [(action, 0)]
+                return action
 
             # 尝试回蓝到期望值
             if self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
                 for item_name in ["Mana Gem", "Mana Potion"]:
                     if action := self.__try_to_use("item", item_name):
-                        return [(action, 0)]
-                return [(ActionDefend(), 0)]
+                        return action
+                return ActionDefend()
 
     def __grind_proficiency(self) -> BaseAction:
-        # 给敌人打麻药
-        if action := self.__control_monster(next(idx for idx, monster in enumerate(self.api.monsters) if monster.health), with_sleep=True):
-            return [(action, 0)]
+        # 回蓝 Buff
+        if not BattleBot.__has_effect("Replenishment", self.api.get_player_effects()) and (action := self.__try_to_use("item", "Mana Draught")):
+            return action
 
-        # 尝试回血到期望值
-        if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)):
-            return [(action, 0)]
+        # 低血量时，睡眠 + 回血，练 Supportive 和 Staff 熟练度; 高血量时，挨打，练 Armor 熟练度
+        if self.api.get_player_health() < self.config.pre_battle_health_reserve:
+            if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
+                return action
+            if action := self.__heal(critical=False):
+                return action
+        else:
+            if not self.__has_effect("Asleep", self.__get_alive_monsters()[0][1].effects) and (action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=False)):
+                return action
 
         return ActionDefend()
+
+    def __auto_attack(self) -> list[tuple[BaseAction, tuple]]:
+        # 获取各个目标的普通攻击、魔法分数
+        action_scores = []
+        for monster_idx in range(len(self.api.monsters)):
+            # Stop beating dead ponies
+            if self.api.monsters[monster_idx].health == 0:
+                continue
+            attack_target = BattleAPI.MONSTER_START_ID + monster_idx
+
+            # 遍历每个魔法
+            for magic in self.api.get_player_magics():
+                if magic.category != "magic_damage" or not magic.available:
+                    continue
+
+                # 获取分数，并添加进候选人名单
+                score = self.__analyze_score(f"Magic:{magic.name}", monster_idx, magic.mana_cost)
+                action_scores.append((ActionMagic(magic=magic, target=attack_target, attack_skill=True), score))
+
+            # 获取普通攻击情况
+            score = self.__analyze_score("Attack", monster_idx, 0)
+            action_scores.append((ActionAttack(target=attack_target, attack_skill=True), score))
+
+        # 返回可用动作
+        return action_scores
 
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
@@ -393,10 +443,10 @@ class BattleBot:
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
             if self.heal_before_end_flag and (action := self.__heal_before_end()):
-                return action
+                return [(action, 0)]
             # 耍戏，提升属性熟练度
             elif self.api.get_player_mana() > self.config.prof_mana_threshold:
-                return [self.__grind_proficiency(), 0]
+                return [(self.__grind_proficiency(), 0)]
 
         # 如果可以撑过这回合，并且 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
         if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
@@ -405,44 +455,11 @@ class BattleBot:
 
         # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
         bosses = [(monster_idx, monster) for monster_idx, monster in enumerate(self.api.monsters) if monster.health > self.config.elite_health_threshold]
-        if len(bosses) == sum(monster.health > 0 for monster in self.api.monsters):
-            for monster_idx, _ in bosses:
-                # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
-                if action := self.__control_monster(monster_idx, with_sleep=False):
-                    return [(action, 0)]
+        if len(bosses) == sum(monster.health > 0 for monster in self.api.monsters) and (action := self.__boss_debuff(bosses)):
+            return [(action, 0)]
 
-            # 如果所有怪兽都被叠了控制 Debuff，那么就给他们叠破防 Debuff
-            if all(BattleBot.__has_effect("Silenced", monster.effects) for _, monster in bosses):
-                for monster_idx, monster in bosses:
-                    if BattleBot.__has_effect("Imperiled", monster.effects):
-                        continue
-                    if action := self.__try_to_use("magic", "Imperil", target=BattleAPI.MONSTER_START_ID + monster_idx):
-                        return [(action, 0)]
-
-        # 选择攻击魔法和目标
-        action_scores = []
-        for monster_idx in range(len(self.api.monsters)):
-            # Stop beating dead ponies
-            if self.api.monsters[monster_idx].health == 0:
-                continue
-            attack_target = BattleAPI.MONSTER_START_ID + monster_idx
-
-            # 遍历每个魔法
-            for magic in self.api.get_player_magics():
-                if magic.category != "magic_damage" or not magic.available:
-                    continue
-
-                # 获取分数，并添加进候选人名单
-                score = self.__analyze_score(f"Magic:{magic.name}", monster_idx, magic.mana_cost)
-                action_scores.append((ActionMagic(magic=magic, target=attack_target, attack_skill=True), score))
-
-            # 获取普通攻击情况
-            score = self.__analyze_score("Attack", monster_idx, 0)
-            action_scores.append((ActionAttack(target=attack_target, attack_skill=True), score))
-
-        # 返回可用动作
-        if action_scores:
-            return action_scores
+        # 攻击阶段
+        return self.__auto_attack()
 
 
 def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: dict[str, Any] | None = None) -> BattleResult:
