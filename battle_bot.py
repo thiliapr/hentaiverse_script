@@ -148,12 +148,12 @@ class BattleBot:
 
     def __predict_damage_to_player(self, skill_id: str) -> float:
         reaction_monsters_ratio = each_damage = 0.
-        alive_monsters = len(self.__get_alive_monsters())
+        active_monsters = sum(not BattleBot.__has_effect("Asleep", monster.effects) for _, monster in self.__get_alive_monsters())
         if skill_id in (database := self.game_data.skill_reaction_monsters_ratio):
             reaction_monsters_ratio = database[skill_id].get_current_average()
         if (database := self.game_data.monster_damage_to_player).total_weight:
             each_damage = database.get_current_average()
-        return alive_monsters * reaction_monsters_ratio * each_damage
+        return active_monsters * reaction_monsters_ratio * each_damage
 
     def __update_attack_data(self, action: ActionMagic | ActionAttack, textlog: list[str]):
         # 分析伤害
@@ -323,17 +323,18 @@ class BattleBot:
 
     def __grind_proficiency(self) -> BaseAction | None:
         # https://ehwiki.org/wiki/Proficiencies
-        attr_actinos = [
-            ("deprecating", self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True)),
-            ("supportive", self.__heal(critical=False))
-        ]
-        for attr, action in attr_actinos:
-            if attr not in self.__grind_proficiency_attrs and action:
-                self.__grind_proficiency_attrs.add(attr)
-                return action
+        if all(attr in self.__grind_proficiency_attrs for attr in ["deprecating", "supportive"]):
+            return
 
-        if any(attr not in self.__grind_proficiency_attrs for attr, _ in attr_actinos):
-            return ActionDefend()
+        # 控制怪兽
+        if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
+            self.__grind_proficiency_attrs.add("deprecating")
+            return action
+
+        # 回血
+        if action := self.__heal(critical=False):
+            self.__grind_proficiency_attrs.add("supportive")
+            return action
 
     def __auto_attack(self) -> list[tuple[BaseAction, tuple]]:
         # 获取各个目标的普通攻击、魔法分数
