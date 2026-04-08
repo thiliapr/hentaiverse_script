@@ -295,7 +295,7 @@ class BattleBot:
                 return action
 
         # 如果所有怪兽都被叠了控制 Debuff，那么就给他们叠破防 Debuff
-        if not all(BattleBot.__has_effect("Silenced", self.api.monsters[idx].effects) for idx in bosses):
+        if not all(BattleBot.__has_effect("Silenced", self.api.monsters[idx].effects) for idx, _ in bosses):
             return
 
         for monster_idx, monster in bosses:
