@@ -194,7 +194,8 @@ class BattleBot:
             raise RuntimeError("使用了回复魔法/物品，却找不到回复记录。这意味着存在回复记录规则的遗漏，请联系作者并把上面的记录发给作者修复（或者你自己加上去）")
 
         health_restored = int(health_restored)
-        self.game_data.skill_recovery_amount[action.skill_id] = max(health_restored, self.game_data.skill_recovery_amount.get(action.recovery_skill, 0))
+        if health_restored:
+            self.game_data.skill_recovery_amount[action.skill_id] = max(health_restored, self.game_data.skill_recovery_amount.get(action.recovery_skill, 0))
 
     def __update_monster_damage(self, action: BaseAction, textlog: list[str]):
         total_damage = 0
