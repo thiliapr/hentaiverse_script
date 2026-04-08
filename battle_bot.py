@@ -430,9 +430,11 @@ class BattleBot:
         if self.api.get_player_health() < self.config.critical_health_line:
             if action := self.__heal(critical=True):
                 return [(action, 0)]
+            print("[battle_bot.BattleBot.decide] [Warning] 尝试紧急治疗失败")
         if self.api.get_player_health() < self.config.normal_healing_line:
             if action := self.__heal(critical=False):
                 return [(action, 0)]
+            print("[battle_bot.BattleBot.decide] [Info] 尝试普通治疗失败")
 
         # 丢弃无用物品
         for item_name in ["Mystic Gem", "Spirit Gem"]:
