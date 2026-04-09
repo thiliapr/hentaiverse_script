@@ -36,7 +36,8 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "pre_battle_health_reserve": 200,
            "pre_battle_mana_reserve": 20,
            "spark_trigger_spirit": 19890604,
-           "prof_mana_threshold": 19890604
+           "prof_mana_threshold": 19890604,
+           "supportive_buff": false
        },
        "task_bot": {
            "market_bot": {
@@ -48,6 +49,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            },
            "battle_bot_override": {
                "encounter": {
+                   "supportive_buff": true
                },
                "arena": {
                }

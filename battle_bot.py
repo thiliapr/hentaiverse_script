@@ -92,6 +92,7 @@ class BattleBotConfig(BaseModel):
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
     spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
     prof_mana_threshold: int = Field(ge=0, description="刷技能熟练度的蓝量门槛。高于此值则用非伤害技能刷熟练度，低于则直接攻击结束战斗")
+    supportive_buff: bool = Field(description="使用 Supportivie 技能获得 Buff，以获得更高的 Mitigation, Action Speed, Evade Chance")
     ewma_multiplier: float = Field(0.99, gt=0, description="EWMA 更新数据的衰减因子，用于更新技能基础伤害，以及怪兽受到技能的伤害")
 
 
@@ -427,6 +428,11 @@ class BattleBot:
             if action := self.__try_to_use("item", "Spirit Potion"):
                 return [(action, 0)]
 
+        # 丢弃无用物品
+        for item_name in ["Mystic Gem", "Spirit Gem"]:
+            if action := self.__try_to_use("item", item_name):
+                return [(action, 0)]
+
         # 分情况进行急救回血和普通回血
         if self.api.get_player_health() < self.config.critical_health_line:
             if action := self.__heal(critical=True):
@@ -437,10 +443,11 @@ class BattleBot:
                 return [(action, 0)]
             print("[battle_bot.BattleBot.decide] [Info] 尝试普通治疗失败")
 
-        # 丢弃无用物品
-        for item_name in ["Mystic Gem", "Spirit Gem"]:
-            if action := self.__try_to_use("item", item_name):
-                return [(action, 0)]
+        # 叠 Supportive Buff
+        if self.config.supportive_buff:
+            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection")]:
+                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name)):
+                    return [(action, 0)]
 
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
