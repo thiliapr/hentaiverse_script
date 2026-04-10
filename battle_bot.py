@@ -443,12 +443,6 @@ class BattleBot:
                 return [(action, 0)]
             print("[battle_bot.BattleBot.decide] [Info] 尝试普通治疗失败")
 
-        # 叠 Supportive Buff
-        if self.config.supportive_buff:
-            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection")]:
-                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
-                    return [(action, 0)]
-
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
             if self.heal_before_end_flag:
@@ -457,6 +451,12 @@ class BattleBot:
             # 耍戏，提升属性熟练度
             elif self.api.get_player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
                 return [(action, 0)]
+
+        # 叠 Supportive Buff
+        if self.config.supportive_buff:
+            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection")]:
+                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
+                    return [(action, 0)]
 
         # 如果可以撑过这回合，并且 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
         if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
