@@ -255,7 +255,7 @@ def main():
             event_type, difficult_level, epsilon, config_override = "随机遇敌事件", config["task_bot"]["encounter_difficult_level"], 0., config["task_bot"]["battle_bot_override"]["encounter"]
         elif battle_func := arena():
             # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
-            event_type, difficult_level, epsilon, config_override = "Arena 战斗", config["task_bot"]["arena_difficult_level"], config["task_bot"]["arena_epsilon"], config["task_bot"]["battle_bot_override"]["encounter"]
+            event_type, difficult_level, epsilon, config_override = "Arena 战斗", config["task_bot"]["arena_difficult_level"], config["task_bot"]["arena_epsilon"], config["task_bot"]["battle_bot_override"]["arena"]
 
         if battle_func is None:
             print("[TaskBot] [LookForBattle] 没有发现战斗事件，等待一会继续 ...")
