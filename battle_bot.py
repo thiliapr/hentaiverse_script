@@ -119,11 +119,11 @@ class BattleBot:
 
     def __init_flags(self):
         # 检测是否需要结束前回血、是否需要叠回血和回蓝 Buff
-        self.heal_before_end_flag = self.draught_buff = False
+        self.restore_before_end_flag = self.draught_buff = False
         if (result := re.search(r"Round (\d+) / (\d+)", self.api.logs[0][0])) is not None:
             current_rounds, total_rounds = [int(x) for x in result.groups()]
             if current_rounds < total_rounds:
-                self.heal_before_end_flag = self.draught_buff = True
+                self.restore_before_end_flag = self.draught_buff = True
         if any(monster.health > self.config.elite_health_threshold for monster in self.api.monsters):
             self.draught_buff = True
 
@@ -243,9 +243,9 @@ class BattleBot:
         damage_sum = sum(actual_damage_taken.values())
         damage_per_mana = damage_sum / max(mana_cost, 1)
 
-        # 如果 heal_before_end_flag 为真，则尽量留活口，下一场战斗前可以回血、蓝、Spirit
+        # 如果 restore_before_end_flag 为真，则尽量留活口，下一场战斗前可以回血、蓝、Spirit
         leave_one_alive = False
-        if self.heal_before_end_flag:
+        if self.restore_before_end_flag:
             leave_one_alive = len(self.__get_alive_monsters()) - will_die == 1
 
         return leave_one_alive, will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
@@ -470,7 +470,7 @@ class BattleBot:
 
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
-            if self.heal_before_end_flag:
+            if self.restore_before_end_flag:
                 if (action := self.__restore_before_end()):
                     return [(action, 0)]
             # 耍戏，提升属性熟练度
