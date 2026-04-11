@@ -237,7 +237,7 @@ class BattleAPI:
             elif res := re.search(r"[\w ]+ [a-z]+s (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log):
                 (monster_name, _, damage), source = res.groups(), "action"
             # You drain 1919810 points of health from Natsuiro Matsuri.
-            elif res := re.search(r"You drain (\d)+ points of health from (.+).", log):
+            elif res := re.search(r"You drain (\d)+ points of health from (.+)", log):
                 (damage, monster_name), source = res.groups(), "effect"
 
             # 添加解析结果到伤害列表
