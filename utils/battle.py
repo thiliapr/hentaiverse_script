@@ -227,7 +227,7 @@ class BattleAPI:
         for log in logs:
             monster_name = damage = source = None
             # Natsuiro Matsuri resists, and was glanced for 8964 Seiso damage.
-            # 你问我为什么 resists 前的不是可选的？游戏就是这么显示的（"Natsuiro Matsuri  was glanced for 8964 Seiso damage."，有两个空格），我觉得这是游戏记录的 bug
+            # 你问我为什么 resists 前空格的不是可选的（不包括在括号里）？但是游戏就是这么显示的（"Natsuiro Matsuri  was glanced for 8964 Seiso damage."，有两个空格），我觉得这是游戏记录的 bug
             if res := re.search(r"(.+?) (resists, and)? was \w+ for (\d+) \w+ damage", log):
                 (monster_name, _, damage), source = res.groups(), "action"
             # Smite hits Natsuiro Matsuri for 19890604 seiso damage.
