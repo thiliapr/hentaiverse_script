@@ -196,7 +196,7 @@ class BattleBot:
 
         health_restored = int(health_restored)
         if health_restored:
-            self.game_data.skill_recovery_amount[action.skill_id] = max(health_restored, self.game_data.skill_recovery_amount.get(action.recovery_skill, 0))
+            self.game_data.skill_recovery_amount[action.skill_id] = max(health_restored, self.game_data.skill_recovery_amount.get(action.skill_id, 0))
 
     def __update_monster_damage(self, action: BaseAction, textlog: list[str]):
         total_damage = 0
