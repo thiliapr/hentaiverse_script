@@ -249,13 +249,13 @@ class BattleBot:
         if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
-    def __heal(self, critical: bool) -> BaseAction | None:
+    def __heal(self, critical: bool) -> tuple[BaseAction | None, bool]:
         # 便宜回血
         action_cure = None
-        if self.__predict_recovery_amount("Magic:Cure") > self.__predict_damage_to_player("Magic:Cure"):
+        if cure_is_worth_it := self.__predict_recovery_amount("Magic:Cure") > self.__predict_damage_to_player("Magic:Cure"):
             action_cure = self.__try_to_use("magic", "Cure", target=BattleAPI.PLAYER_ID, recovery_skill=True)
         if not critical:
-            return action_cure
+            return action_cure, cure_is_worth_it
 
         # 紧急、昂贵回血
         action_full_cure = None
@@ -267,7 +267,24 @@ class BattleBot:
             if action_consumable := self.__try_to_use("item", item_name, recovery_skill=True):
                 break
 
-        return action_full_cure or action_consumable or action_cure
+        return action_full_cure or action_consumable or action_cure, cure_is_worth_it
+
+    def __decrease_cooldown(self) -> ActionMagic | None:
+        # Higher action speed decreases the amount of time units an action takes. This will often lead to being able to perform more actions per tick. This will be most visible with buff durations, as it becomes possible to attack multiple times before the duration decreases by 1. Similarly, vital regeneration, be they from spells, items, or natural regeneration, are also only received when ticks happen. A monster having a high attack speed or an action performed by the player having a long action time, may allow monsters to attack multiple times in a single player action.
+        # Action	Base Action Speed
+        # Cure, Regen	0.2?
+        # Haste, Shadow Veil, Absorb, Spark of Life, Arcane Focus, Heartseeker, Spirit Shield	0.1?
+        # Protection	0.2?
+        # https://ehwiki.org/wiki/Action_Speed
+        action_scores = []
+        for magic_name in ["Cure", "Regen", "Haste", "Shadow Veil", "Absorb", "Spark of Life", "Arcane Focus", "Heartseeker", "Spirit Shield", "Protection"]:
+            if (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)) is None:
+                continue
+            if (damage_to_player := self.__predict_damage_to_player(action.skill_id)) > self.api.get_player_health():
+                continue
+            action_scores.append((action, (-damage_to_player, -action.magic.mana_cost)))
+        if action_scores:
+            return max(action_scores, key=lambda x: x[1])[0]
 
     def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
         control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
@@ -313,7 +330,7 @@ class BattleBot:
                 return action
 
             # 尝试回血到期望值
-            if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)):
+            if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)[0]):
                 return action
 
             # 尝试回蓝到期望值
@@ -334,7 +351,7 @@ class BattleBot:
             return action
 
         # 回血
-        if action := self.__heal(critical=False):
+        if action := self.__heal(critical=False)[0]:
             self.__grind_proficiency_attrs.add("supportive")
             return action
 
@@ -435,13 +452,16 @@ class BattleBot:
 
         # 分情况进行急救回血和普通回血
         if self.api.get_player_health() < self.config.critical_health_line:
-            if action := self.__heal(critical=True):
+            action, cure_is_worth_it = self.__heal(critical=True)
+            if action:
                 return [(action, 0)]
-            print("[battle_bot.BattleBot.decide] [Warning] 尝试紧急治疗失败")
+
+            # 如果只是 Cure 在 CD（因为 Cure 的 CD 短，等得起），那就做一些消耗 CD 又动作快（不被太多怪兽攻击）的事情
+            if cure_is_worth_it and (action := self.__decrease_cooldown()):
+                return [(action, 0)]
         if self.api.get_player_health() < self.config.normal_healing_line:
-            if action := self.__heal(critical=False):
+            if action := self.__heal(critical=False)[0]:
                 return [(action, 0)]
-            print("[battle_bot.BattleBot.decide] [Info] 尝试普通治疗失败")
 
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复

@@ -212,7 +212,13 @@ class BattleAPI:
 
     @staticmethod
     def __parse_effect(effect_str: str) -> Effect:
-        name, description, remaining_turns = re.search(r"battle\.set_infopane_effect\('([^']+)',\s*'([^']+)',\s*(\d+)\)", effect_str).groups()
+        name, description, remaining_turns = re.search(r"battle\.set_infopane_effect\('([^']+)',\s*'([^']+)',\s*([^)]+)\)", effect_str).groups()
+        # 有些 Effect 是永久性的（触发效果才消失），比如 battle.set_infopane_effect('Absorbing Ward', 'The next magical attack against the target has a chance to be absorbed and partially converted to MP.', 'permanent')
+        try:
+            int(remaining_turns)
+        except ValueError:
+            remaining_turns = 19890604
+        # 返回封装对象
         return Effect(name=name, description=description, remaining_turns=remaining_turns)
 
     @staticmethod
