@@ -119,11 +119,11 @@ class BattleBot:
 
     def __init_flags(self):
         # 检测是否需要结束前回血、是否需要叠回血和回蓝 Buff
-        self.restore_before_end_flag = self.draught_buff = False
+        self.__restore_before_end_flag = self.draught_buff = False
         if (result := re.search(r"Round (\d+) / (\d+)", self.api.logs[0][0])) is not None:
             current_rounds, total_rounds = [int(x) for x in result.groups()]
             if current_rounds < total_rounds:
-                self.restore_before_end_flag = self.draught_buff = True
+                self.__restore_before_end_flag = self.draught_buff = True
         if any(monster.health > self.config.elite_health_threshold for monster in self.api.monsters):
             self.draught_buff = True
 
@@ -245,7 +245,7 @@ class BattleBot:
 
         # 如果 restore_before_end_flag 为真，则尽量留一个活口，下一场战斗前可以回血、蓝、Spirit
         leave_one_alive = False
-        if self.restore_before_end_flag:
+        if self.__require_restore_before_end():
             leave_one_alive = len(self.__get_alive_monsters()) - will_die == 1
 
         return leave_one_alive, will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
@@ -327,23 +327,25 @@ class BattleBot:
             if action := self.__try_to_use("magic", "Imperil", target=BattleAPI.MONSTER_START_ID + monster_idx):
                 return action
 
+    def __require_restore_before_end(self) -> bool:
+        require_restore = self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve
+        return self.__restore_before_end_flag and require_restore
+
     def __restore_before_end(self) -> BaseAction | None:
-        # 仅当战场只存在一个怪兽时使用
-        if self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
-            # 给敌人打麻药
-            if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
-                return action
+        # 给敌人打麻药
+        if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
+            return action
 
-            # 尝试回血到期望值
-            if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)[0]):
-                return action
+        # 尝试回血到期望值
+        if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)[0]):
+            return action
 
-            # 尝试回蓝到期望值
-            if self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
-                for item_name in ["Mana Gem", "Mana Potion"]:
-                    if action := self.__try_to_use("item", item_name):
-                        return action
-                return ActionDefend()
+        # 尝试回蓝到期望值
+        if self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
+            for item_name in ["Mana Gem", "Mana Potion"]:
+                if action := self.__try_to_use("item", item_name):
+                    return action
+            return ActionDefend()
 
     def __grind_proficiency(self) -> BaseAction | None:
         # https://ehwiki.org/wiki/Proficiencies
@@ -470,7 +472,7 @@ class BattleBot:
 
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
-            if self.restore_before_end_flag:
+            if self.__require_restore_before_end():
                 if (action := self.__restore_before_end()):
                     return [(action, 0)]
             # 耍戏，提升属性熟练度
