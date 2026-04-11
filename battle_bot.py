@@ -83,7 +83,7 @@ class ActionDefend(BaseAction):
 
 
 class BattleBotConfig(BaseModel):
-    elite_health_threshold: int = Field(gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
+    elite_health_threshold = Field(gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
     critical_health_line: int = Field(gt=0, description="濒死判定线，低于此值将不计代价回血")
     normal_healing_line: int = Field(gt=0, description="治疗触发阈值，当血量高于濒死线但低于此值时，会尝试使用普通治疗技能（如非紧急的小恢复术）")
     mana_supply_line: int = Field(description="魔力补给触发阈值，低于此值尝试恢复魔力")
@@ -124,7 +124,7 @@ class BattleBot:
             current_rounds, total_rounds = [int(x) for x in result.groups()]
             if current_rounds < total_rounds:
                 self.heal_before_end_flag = self.draught_buff = True
-        if any(monster.health > self.config.elite_health_threshold * 2 for monster in self.api.monsters):
+        if any(monster.health > self.config.elite_health_threshold for monster in self.api.monsters):
             self.draught_buff = True
 
     @staticmethod
