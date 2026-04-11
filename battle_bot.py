@@ -472,8 +472,8 @@ class BattleBot:
 
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
-            if self.__require_restore_before_end():
-                if (action := self.__restore_before_end()):
+            if self.__restore_before_end_flag:
+                if self.__require_restore_before_end() and (action := self.__restore_before_end()):
                     return [(action, 0)]
             # 耍戏，提升属性熟练度
             elif self.api.get_player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
