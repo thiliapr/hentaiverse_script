@@ -243,7 +243,12 @@ class BattleBot:
         damage_sum = sum(actual_damage_taken.values())
         damage_per_mana = damage_sum / max(mana_cost, 1)
 
-        return will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
+        # 如果 heal_before_end_flag 为真，则尽量留活口，下一场战斗前可以回血、蓝、Spirit
+        leave_one_alive = False
+        if self.heal_before_end_flag:
+            leave_one_alive = len(self.__get_alive_monsters()) - will_die == 1
+
+        return leave_one_alive, will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
 
     def __try_to_use(self, category: Literal["magic", "item"], name: str, **kwargs) -> ActionItem | ActionMagic | None:
         if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
@@ -322,7 +327,7 @@ class BattleBot:
             if action := self.__try_to_use("magic", "Imperil", target=BattleAPI.MONSTER_START_ID + monster_idx):
                 return action
 
-    def __heal_before_end(self) -> BaseAction | None:
+    def __restore_before_end(self) -> BaseAction | None:
         # 仅当战场只存在一个怪兽时使用
         if self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
             # 给敌人打麻药
@@ -466,7 +471,7 @@ class BattleBot:
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
             if self.heal_before_end_flag:
-                if (action := self.__heal_before_end()):
+                if (action := self.__restore_before_end()):
                     return [(action, 0)]
             # 耍戏，提升属性熟练度
             elif self.api.get_player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
