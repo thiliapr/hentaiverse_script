@@ -244,9 +244,10 @@ class BattleBot:
         damage_per_mana = damage_sum / max(mana_cost, 1)
 
         # 如果 restore_before_end_flag 为真，则尽量留一个活口，下一场战斗前可以回血、蓝、Spirit
-        leave_one_alive = False
+        leave_one_alive = None
         if self.__require_restore_before_end():
-            leave_one_alive = len(self.__get_alive_monsters()) - will_die == 1
+            alive = len(self.__get_alive_monsters())
+            leave_one_alive = alive - will_die == 1, alive - len(window) == 1
 
         return leave_one_alive, will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
 
