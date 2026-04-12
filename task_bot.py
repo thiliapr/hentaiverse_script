@@ -17,6 +17,33 @@ config = json.loads(pathlib.Path("world/persistent/config.json").read_text("utf-
 request_kwargs = {"cookies": {"ipb_member_id": config["authentication"]["ipb_member_id"], "ipb_pass_hash": config["authentication"]["ipb_pass_hash"]}, "headers": {"User-Agent": config["authentication"]["user_agent"]}}
 
 
+def monster_lab_bot() -> tuple[bool, int]:
+    soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=ml", **request_kwargs).text, "lxml")
+
+    # 喂饱肚子
+    if feed := soup.find(onclick="do_feed_all('food')") is not None:
+        request_with_retry(requests.post, href, data={"feed_all": "food"}, **request_kwargs)
+
+    # 给属性加点
+    attrs_upgraded = 0
+    for slot in soup.find(id="slot_pane").find_all(class_="msl"):
+        href = re.search(r"document\.location='([^']+)'", slot.attrs["onclick"]).group(1)
+        soup = BeautifulSoup(request_with_retry(requests.get, href, **request_kwargs).text, "lxml")
+
+        # 寻找可加点属性
+        for attr_group in soup.find(id="monsterstats_top").find_all(class_="mcr"):
+            for attr in attr_group.find_all("tr"):
+                if "onclick" not in (upgrade_button := attr.find("img")).attrs:
+                    continue
+                
+                # 加点、记录
+                attr_name = re.search(r"do_crystal_upgrade\('(\w+)', event\)", upgrade_button.attrs["onclick"]).group(1)
+                request_with_retry(requests.post, href, data={"crystal_upgrade": attr_name, "crystal_count": "1"}, **request_kwargs)
+                attrs_upgraded += 1
+
+    return feed, attrs_upgraded
+
+
 def market_bot() -> tuple[int, list[str]]:
     # 获取市场主页
     soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=mk", **request_kwargs).text, "lxml")
@@ -72,7 +99,7 @@ def equipment_store_bot() -> int:
     # 卖掉各个过滤器下的物品
     filters = [filter_element.attrs["href"] for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in config["task_bot"]["equipment_store_bot"]["skipped_filters"]]
     items_sold = 0
-    for href in tqdm(filters, desc="Sell Equipment Store Items"):
+    for href in tqdm(filters, desc="Sell Equipments"):
         soup = BeautifulSoup(request_with_retry(requests.get, href, **request_kwargs).text, "lxml")
 
         # 遍历每一个物品
@@ -292,10 +319,21 @@ def main():
         market_balance, items_sold = market_bot()
         if market_balance:
             print(f"[TaskBot] [MarketBot] 入账 {market_balance} Credits; 变卖了的物品: {items_sold}")
-        
+
         print(f"[TaskBot] [EquipmentStoreBot] 变卖装备 ...")
         if items_sold := equipment_store_bot():
             print(f"[TaskBot] [EquipmentStoreBot] 变卖了 {items_sold} 件装备")
+
+        # 养宠物
+        print(f"[TaskBot] [MonsterLabBot] 检测 Monster 情况 ...")
+        if any(result := monster_lab_bot()):
+            feed, attrs_upgraded = result
+            log = "[TaskBot] [MonsterLabBot] "
+            if feed:
+                log += "喂养了 Monster，"
+            if attrs_upgraded:
+                log += f"加点了 {attrs_upgraded} 个属性"
+            print(log)
 
         # 统计输赢信息，记录
         stats_file = pathlib.Path("world/persistent/stats_data.json")
