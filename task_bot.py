@@ -22,7 +22,7 @@ def monster_lab_bot() -> tuple[bool, int]:
 
     # 喂饱肚子
     if feed := soup.find(onclick="do_feed_all('food')") is not None:
-        request_with_retry(requests.post, href, data={"feed_all": "food"}, **request_kwargs)
+        request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=ml", data={"feed_all": "food"}, **request_kwargs)
 
     # 给属性加点
     attrs_upgraded = 0
