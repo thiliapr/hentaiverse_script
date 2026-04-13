@@ -79,7 +79,7 @@ def equipment_store_bot() -> int:
 
 def arnea() -> Callable[[], Any] | None:
     page = request_with_retry(requests.get, f"{MAIN_URL}/isekai/?s=Battle&ss=ar", **request_kwargs).text
-    if int(re.search(r"Stamina: (\d+)", page).group(1)) < 85:
+    if int(re.search(r"Stamina: (\d+)", page).group(1)) < 76:
         return
 
     soup = BeautifulSoup(page, "lxml")
