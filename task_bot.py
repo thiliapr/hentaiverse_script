@@ -11,18 +11,19 @@ from bs4 import BeautifulSoup
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 from utils.battle import TokenNotFoundError
-from battle_bot import battle
+from battle_bot import battle_with_skip_riddle
 
 config = json.loads(pathlib.Path("world/persistent/config.json").read_text("utf-8"))
 request_kwargs = {"cookies": {"ipb_member_id": config["authentication"]["ipb_member_id"], "ipb_pass_hash": config["authentication"]["ipb_pass_hash"]}, "headers": {"User-Agent": config["authentication"]["user_agent"]}}
 
 
 def monster_lab_bot() -> tuple[bool, int]:
-    soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Bazaar&ss=ml", **request_kwargs).text, "lxml")
+    url = f"{MAIN_URL}/?s=Bazaar&ss=ml"
+    soup = BeautifulSoup(request_with_retry(requests.get, url, **request_kwargs).text, "lxml")
 
     # 喂饱肚子
     if feed := soup.find(onclick="do_feed_all('food')") is not None:
-        request_with_retry(requests.post, f"{MAIN_URL}/?s=Bazaar&ss=ml", data={"feed_all": "food"}, **request_kwargs)
+        request_with_retry(requests.post, url, data={"feed_all": "food"}, **request_kwargs)
 
     # 给属性加点
     attrs_upgraded = 0
@@ -98,29 +99,30 @@ def equipment_store_bot() -> int:
     
     # 卖掉各个过滤器下的物品
     filters = [filter_element.attrs["href"] for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in config["task_bot"]["equipment_store_bot"]["skipped_filters"]]
-    items_sold = 0
+    equipments_sold = 0
     for href in tqdm(filters, desc="Sell Equipments"):
         soup = BeautifulSoup(request_with_retry(requests.get, href, **request_kwargs).text, "lxml")
 
         # 遍历每一个物品
-        items_to_sell = []
-        for item_element in soup.find(id="item_pane").find(class_="equiplist").find_all(class_="eqp"):
-            if not (sell_button := item_element.find(attrs={"data-locked": "0"})):
+        equipments = []
+        for equipment in soup.find(id="item_pane").find(class_="equiplist").find_all(class_="eqp"):
+            if not (sell_button := equipment.find(attrs={"data-locked": "0"})):
                 continue
-            items_to_sell.append(re.search(r"equips.set\((\d+),'item_pane',\d+,\d+\)", sell_button.attrs["onmouseover"]).group(1))
+            equipments.append(re.search(r"equips.set\((\d+),'item_pane',\d+,\d+\)", sell_button.attrs["onmouseover"]).group(1))
 
         # 卖出物品
-        if not items_to_sell:
+        if not equipments:
             continue
         storetoken = soup.find("input", attrs={"name": "storetoken"}).attrs["value"]
-        request_with_retry(requests.post, href, data={"storetoken": storetoken, "select_group": "item_pane", "select_eids": ",".join(items_to_sell)}, **request_kwargs)
-        items_sold += len(items_to_sell)
+        request_with_retry(requests.post, href, data={"storetoken": storetoken, "select_group": "item_pane", "select_eids": ",".join(equipments)}, **request_kwargs)
+        equipments_sold += len(equipments)
 
-    return items_sold
+    return equipments_sold
 
 
 def train_henjutsu() -> str | None:
-    soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=tr", **request_kwargs).text, "lxml")
+    url = f"{MAIN_URL}/?s=Character&ss=tr"
+    soup = BeautifulSoup(request_with_retry(requests.get, url, **request_kwargs).text, "lxml")
     for subject in soup.find(id="train_table").find_all("tr"):
         # 跳过表头
         info_elements = subject.find_all("td")
@@ -137,12 +139,13 @@ def train_henjutsu() -> str | None:
         
         # 开始训练
         subject_id, = re.search(r"training.start_training\((\d+)\)", train_button.attrs["onclick"]).groups()
-        request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=tr", data={"start_train": subject_id, "cancel_train": "0"}, **request_kwargs)
+        request_with_retry(requests.post, url, data={"start_train": subject_id, "cancel_train": "0"}, **request_kwargs)
         return henjutsu_name
 
 
 def attribute_point_allocation() -> list[str]:
-    soup = BeautifulSoup(request_with_retry(requests.get, f"{MAIN_URL}/?s=Character&ss=ch", **request_kwargs).text, "lxml")
+    url = f"{MAIN_URL}/?s=Character&ss=ch"
+    soup = BeautifulSoup(request_with_retry(requests.get, url, **request_kwargs).text, "lxml")
 
     # 获取剩余 EXP 和属性加点所需 EXP
     attributes = ["str", "dex", "agi", "end", "int", "wis"]
@@ -159,7 +162,7 @@ def attribute_point_allocation() -> list[str]:
 
     # 发送请求
     if any(v > 0 for v in attr_delta.values()):
-        request_with_retry(requests.post, f"{MAIN_URL}/?s=Character&ss=ch", data={"attr_apply": "1"} | {f"{attr}_delta": str(delta) for attr, delta in attr_delta.items()}, **request_kwargs)
+        request_with_retry(requests.post, url, data={"attr_apply": "1"} | {f"{attr}_delta": str(delta) for attr, delta in attr_delta.items()}, **request_kwargs)
     return [k for k, v in attr_delta.items() if v > 0]
 
 
@@ -218,8 +221,7 @@ def arena() -> Callable[[], Any] | None:
     # | Stamina | Status | Effect |
     # | 60-99 | Great | +100% EXP but stamina drains 50% faster |
     # https://ehwiki.org/wiki/Stamina
-    stamina, = re.search(r"Stamina: (\d+)", page).groups()
-    if int(stamina) < 85:
+    if int(re.search(r"Stamina: (\d+)", page).group(1)) < 85:
         return
     
     # 检测可用的 Arena，并筛选
@@ -248,21 +250,6 @@ def arena() -> Callable[[], Any] | None:
     return battle_func
 
 
-def battle_with_skip_riddle(*args, **kwargs):
-    while True:
-        try:
-            return battle(*args, **kwargs)
-        except TokenNotFoundError as e:
-            if "function check_submit_button() {" in e.page:
-                # 如果遇到小马谜题，我们无法跳过，只能作答，或者等待谜题过期。Wiki 里说多选择一个错误的小马，比少选一个正确的小马的惩罚要大。谜题过期，也就是选择缺省值——谁都不选
-                # Selecting a pony that is not in the picture will count more severe towards a penalty than missing one pony - so when in doubt, best not to guess but leave one blank
-                # https://ehwiki.org/wiki/RiddleMaster
-                print("遇到小马谜题了！")
-                time.sleep(20)
-                continue
-            raise e
-
-
 def main():
     # 初始化随机遇敌函数内部状态
     encounter_cookies = {}
@@ -278,10 +265,8 @@ def main():
         print("[TaskBot] [LookForBattle] 检测战斗事件 ...")
         battle_func = None
         if battle_func := encounter(encounter_cookies):
-            # 随机遇敌只有 1 个回合，比较容易打，而且不消耗体力，所以提升难度，拿更多 EXP
             event_type, difficult_level, epsilon, config_override = "随机遇敌事件", config["task_bot"]["encounter_difficult_level"], 0., config["task_bot"]["battle_bot_override"]["encounter"]
         elif battle_func := arena():
-            # Arena 有十几个回合，高难度下可能失败，打的目的主要是拿 Credit，而且本身消耗体力，所以降低难度，提高成功率
             event_type, difficult_level, epsilon, config_override = "Arena 战斗", config["task_bot"]["arena_difficult_level"], config["task_bot"]["arena_epsilon"], config["task_bot"]["battle_bot_override"]["arena"]
 
         if battle_func is None:
@@ -321,8 +306,8 @@ def main():
             print(f"[TaskBot] [MarketBot] 入账 {market_balance} Credits; 变卖了的物品: {items_sold}")
 
         print(f"[TaskBot] [EquipmentStoreBot] 变卖装备 ...")
-        if items_sold := equipment_store_bot():
-            print(f"[TaskBot] [EquipmentStoreBot] 变卖了 {items_sold} 件装备")
+        if equipments_sold := equipment_store_bot():
+            print(f"[TaskBot] [EquipmentStoreBot] 变卖了 {equipments_sold} 件装备")
 
         # 养宠物
         print(f"[TaskBot] [MonsterLabBot] 检测 Monster 情况 ...")
@@ -330,7 +315,9 @@ def main():
             feed, attrs_upgraded = result
             log = "[TaskBot] [MonsterLabBot] "
             if feed:
-                log += "喂养了 Monster，"
+                log += "喂养了 Monster"
+                if attrs_upgraded:
+                    log += "，"
             if attrs_upgraded:
                 log += f"加点了 {attrs_upgraded} 个属性"
             print(log)

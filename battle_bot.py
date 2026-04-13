@@ -567,17 +567,36 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
     return api.battle_result
 
 
+def battle_with_skip_riddle(*args, **kwargs):
+    while True:
+        try:
+            return battle(*args, **kwargs)
+        except TokenNotFoundError as e:
+            if "function check_submit_button() {" in e.page:
+                # 如果遇到小马谜题，我们无法跳过，只能作答，或者等待谜题过期。Wiki 里说多选择一个错误的小马，比少选一个正确的小马的惩罚要大。谜题过期，也就是选择缺省值——谁都不选
+                # Selecting a pony that is not in the picture will count more severe towards a penalty than missing one pony - so when in doubt, best not to guess but leave one blank
+                # https://ehwiki.org/wiki/RiddleMaster
+                print("[battle_bot.battle_with_skip_riddle] 遇到小马谜题了！")
+                time.sleep(20)
+                continue
+            raise e
+
+
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--isekai", action="store_true", help="游戏分两个模式: Persistent 和 Isekai。指定该 flag 以进行异世界的战斗")
     parser.add_argument("-e", "--epsilon", type=float, default=0., help="随机探索率，越大越激进，越小越保守")
     parser.add_argument("-l", "--loop", action="store_true", help="一直尝试进行战斗，直到找不到战斗")
     parser.add_argument("-d", "--difficult-level", default="default", help="这场战斗的难度等级。这会影响怪兽对玩家伤害的预测")
+    parser.add_argument("-s", "--skip-riddle", action="store_true", help="遇到小马谜题时，等待过期再继续战斗")
     return parser.parse_args(args)
 
 
 def main(args: argparse.Namespace):
     battle_func = partial(battle, args.isekai, args.epsilon, args.difficult_level)
+    if args.skip_riddle:
+        battle_func = partial(battle_with_skip_riddle, battle_func)
+
     if args.loop:
         try:
             while True:
