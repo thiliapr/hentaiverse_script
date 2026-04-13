@@ -593,9 +593,10 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace):
-    battle_func = partial(battle, args.isekai, args.epsilon, args.difficult_level)
+    battle_args = args.isekai, args.epsilon, args.difficult_level
+    battle_func = partial(battle, *battle_args)
     if args.skip_riddle:
-        battle_func = partial(battle_with_skip_riddle, battle_func)
+        battle_func = partial(battle_with_skip_riddle, *battle_args)
 
     if args.loop:
         try:
