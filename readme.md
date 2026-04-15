@@ -61,6 +61,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
        }
    }
    ```
+2. 填写`world/isekai/config.json`填写类似配置，但是不用写`task_bot`项
 3. 运行`python task_bot.py`，大功告成
 
 ### 异世界
