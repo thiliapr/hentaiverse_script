@@ -25,14 +25,13 @@ class BaseBot(ABC):
         return request_with_retry(*args, **kwargs, **self.request_kwargs)
 
     def attribute_point_allocation(self) -> int:
-        url = f"{self.main_url}/?s=Character&ss=ch"
-        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
-
-        # 获取剩余 EXP 和属性加点所需 EXP
         # https://ehwiki.org/wiki/Character_Stats#Primary_Attributes
+        url = f"{self.main_url}/?s=Character&ss=ch"
         attributes = ["str", "dex", "agi", "end", "int", "wis"]
         total_attributes_allocated = 0
+
         while True:
+            soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
             remaining_exp = int(soup.find(id="remaining_exp").text.replace(",", ""))
             required_exp = {attr: int(soup.find(id=f"{attr}_left").text.replace(",", "")) for attr in attributes}
 
