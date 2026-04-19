@@ -35,6 +35,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "spirit_supply_line": -1,
            "pre_battle_health_reserve": 200,
            "pre_battle_mana_reserve": 20,
+           "pre_battle_magics": ["Full-Cure", "Cure"],
            "spark_trigger_spirit": 19890604,
            "prof_mana_threshold": 19890604,
            "supportive_buff": false
@@ -67,7 +68,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
 ### 异世界
 1. 异世界的介绍请参见 [Wiki](https://ehwiki.org/wiki/Isekai)
 2. - 使用方法快速使用相同，但是把 `world/persistent` 改成 `world/isekai`，然后填写异世界专用配置
-   - 配置只需要填写 `authentication` 和 `battle_bot` 项，不需要填写 `task_bot` 项
+   - `task_bot` 需要 `market_bot` 和 `epsilon` 项，不需要其他项
 3. 运行时手动打开异世界的战斗，然后运行 `python battle_bot.py --isekai` 即可
 
 ## 怎么写自己的脚本

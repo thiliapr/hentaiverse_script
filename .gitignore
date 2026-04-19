@@ -208,3 +208,6 @@ __marimo__/
 
 # HV Game
 world/
+riddle/dataset/
+riddle/*.pt
+riddle/run

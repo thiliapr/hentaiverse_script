@@ -3,7 +3,7 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, time, re, requests
+import random, json, pathlib, time, re, requests
 from abc import ABC, abstractmethod
 from typing import Any
 from collections.abc import Callable
@@ -52,69 +52,18 @@ class BaseBot(ABC):
 
         return total_attributes_allocated
 
-    @abstractmethod
-    def task(self) -> bool:
-        pass
-
-
-class PersistentBot(BaseBot):
-    def __init__(self):
-        config = json.loads(pathlib.Path("world/persistent/config.json").read_text("utf-8"))
-        self.init(config, MAIN_URL)
-        self.encounter_cookies = {}
-        self.last_encounter_time = time.time()
-
-    def train_henjutsu(self) -> str | None:
-        url = f"{self.main_url}/?s=Character&ss=tr"
-        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
-        for subject in soup.find(id="train_table").find_all("tr"):
-            # 跳过表头
-            info_elements = subject.find_all("td")
-            if not info_elements:
-                continue
-
-            # 根据名字筛选
-            if (henjutsu_name := info_elements[0].text) not in self.config["task_bot"]["training_henjutsu"]:
-                continue
-
-            # 如果无法训练（比如还在训练，或者 Credits 不够），看看下一个的情况
-            if "onclick" not in (train_button := info_elements[-1].find("img")).attrs:
-                continue
-            
-            # 开始训练
-            subject_id, = re.search(r"training.start_training\((\d+)\)", train_button.attrs["onclick"]).groups()
-            self.api_request(requests.post, url, data={"start_train": subject_id, "cancel_train": "0"})
-            return henjutsu_name
-
-    def repair_equipment(self) -> Callable[[], Any] | None:
-        url = f"{self.main_url}/?s=Forge&ss=re"
-        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
-
-        # 如果存在至少一个装备损坏，就修复装备
-        if soup.find(class_="equiplist").find(class_="eqp"):
-            return lambda: self.api_request(requests.post, url, data={"repair_all": "1"})
-
-    def settings(self, difficult_level: str):
-        url = f"{self.main_url}/?s=Character&ss=se"
-        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
-
-        # 获取字体信息
-        use_local_font = "checked" in soup.find("input", attrs={"name": "fontlocal"}).attrs
-        font_family = soup.find("input", {"name": "fontface"}).attrs["value"]
-
-        # 选择最佳称号（最后一个效果最好）和最佳 UI（Utilitarian）
-        title_override = soup.find(id="settings_title").find_all("tr")[-1].find("input", {"name": "title_override"}).attrs["value"]
-        vitalstyle = "d"
-
-        # 更改设置
-        self.api_request(requests.post, url, data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"})
-
     def market_bot(self) -> tuple[int, list[str]]:
+        # 获取跳过的过滤器和物品
+        skipped_filters = wanted_items = []
+        if "task_bot" in self.config:
+            skipped_filters = self.config["task_bot"]["market_bot"]["skipped_filters"]
+            wanted_items = self.config["task_bot"]["market_bot"]["wanted_items"]
+
         # 获取市场主页
         soup = BeautifulSoup(self.api_request(requests.get, f"{self.main_url}/?s=Bazaar&ss=mk").text, "lxml")
 
         # 查看各个过滤器下的物品
-        filters = [(filter_element.text, filter_element.attrs["href"]) for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in self.config["task_bot"]["market_bot"]["skipped_filters"]]
+        filters = [(filter_element.text, filter_element.attrs["href"]) for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in skipped_filters]
         items_to_sell = []
         for filter_name, href in tqdm(filters, desc="Fetch Market's Itemlist"):
             soup = BeautifulSoup(self.api_request(requests.get, href).text, "lxml")
@@ -122,7 +71,7 @@ class PersistentBot(BaseBot):
             # 遍历每一个物品
             for item_element in soup.find(id="market_itemlist").find_all("tr", onclick=True):
                 item_name, your_stock = [ele.text for ele in item_element.find_all("td")[:2]]
-                if item_name in self.config["task_bot"]["market_bot"]["wanted_items"]:
+                if item_name in wanted_items:
                     continue
                 if your_stock == "":
                     continue
@@ -155,6 +104,64 @@ class PersistentBot(BaseBot):
             self.api_request(requests.post, f"{self.main_url}/?s=Bazaar&ss=mk", data={"marketoken": marketoken, "account_amount": market_balance, "account_withdraw": action_value})
 
         return int(market_balance), items_sold
+
+    @abstractmethod
+    def task(self) -> bool:
+        pass
+
+
+class PersistentBot(BaseBot):
+    def __init__(self):
+        config = json.loads(pathlib.Path("world/persistent/config.json").read_text("utf-8"))
+        self.init(config, MAIN_URL)
+        self.encounter_cookies = {}
+
+    def train_henjutsu(self) -> str | None:
+        url = f"{self.main_url}/?s=Character&ss=tr"
+        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
+        for subject in soup.find(id="train_table").find_all("tr"):
+            # 跳过表头
+            info_elements = subject.find_all("td")
+            if not info_elements:
+                continue
+
+            # 根据名字筛选
+            if (henjutsu_name := info_elements[0].text) not in self.config["task_bot"]["training_henjutsu"]:
+                continue
+
+            # 如果无法训练（比如还在训练，或者 Credits 不够），看看下一个的情况
+            if "onclick" not in (train_button := info_elements[-1].find("img")).attrs:
+                continue
+            
+            # 开始训练
+            subject_id, = re.search(r"training.start_training\((\d+)\)", train_button.attrs["onclick"]).groups()
+            self.api_request(requests.post, url, data={"start_train": subject_id, "cancel_train": "0"})
+            return henjutsu_name
+
+    def repair_equipment(self) -> bool:
+        url = f"{self.main_url}/?s=Forge&ss=re"
+        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
+
+        # 如果存在至少一个装备损坏，就修复装备
+        if soup.find(class_="equiplist").find(class_="eqp"):
+            self.api_request(requests.post, url, data={"repair_all": "1"})
+            return True
+        return False
+
+    def settings(self, difficult_level: str):
+        url = f"{self.main_url}/?s=Character&ss=se"
+        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
+
+        # 获取字体信息
+        use_local_font = "checked" in soup.find("input", attrs={"name": "fontlocal"}).attrs
+        font_family = soup.find("input", {"name": "fontface"}).attrs["value"]
+
+        # 选择最佳称号（最后一个效果最好）和最佳 UI（Utilitarian）
+        title_override = soup.find(id="settings_title").find_all("tr")[-1].find("input", {"name": "title_override"}).attrs["value"]
+        vitalstyle = "d"
+
+        # 更改设置
+        self.api_request(requests.post, url, data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"})
 
     def equipment_store_bot(self) -> int:
         # 获取装备商店主页
@@ -212,7 +219,6 @@ class PersistentBot(BaseBot):
     def encounter(self) -> Callable[[], Any] | None:
         # Random Encounter is a single-round battle that places players against common foes in order to get a lot credits and EXP.
         # https://ehwiki.org/wiki/Random_Encounter
-        self.last_encounter_time = time.time()
         cookies = self.request_kwargs["cookies"]
         headers = self.request_kwargs["headers"]
 
@@ -285,9 +291,8 @@ class PersistentBot(BaseBot):
             return False
 
         print(f"[task_bot.PersistentBot.task] [{event_type}] [RepairEquipment] 检测装备损坏 ...")
-        if repair_func := self.repair_equipment():
-            print(f"[task_bot.PersistentBot.task] [{event_type}] [RepairEquipment] 正在修复装备 ...")
-            repair_func()
+        if self.repair_equipment():
+            print(f"[task_bot.PersistentBot.task] [{event_type}] [RepairEquipment] 已修复所有装备")
 
         print(f"[task_bot.PersistentBot.task] [{event_type}] [AllocateAttribute] 尝试加点 ...")
         if attr_allocated := self.attribute_point_allocation():
@@ -328,7 +333,7 @@ class IsekaiBot(BaseBot):
         config = json.loads(pathlib.Path("world/isekai/config.json").read_text("utf-8"))
         self.init(config, f"{MAIN_URL}/isekai")
 
-    def repair_equipment(self) -> Callable[[], Any] | None:
+    def repair_equipment(self) -> bool:
         url = f"{self.main_url}/?s=Bazaar&ss=am&screen=repair&filter=equipped"
         soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
 
@@ -338,11 +343,12 @@ class IsekaiBot(BaseBot):
             equipment_id = re.search(r"hover_equip\((\d+)\)", equipment.attrs["onmouseover"]).group(1)
             equipments.append(equipment_id)
         if not equipments:
-            return
+            return False
         
-        # 准备网络请求
+        # 网络请求
         postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
-        return lambda: self.api_request(requests.post, url, data={"postoken": postoken, "eqids[]": equipments, "replace_charms": "on"})
+        self.api_request(requests.post, url, data={"postoken": postoken, "eqids[]": equipments, "replace_charms": "on"})
+        return True
 
     def equipment_store_bot(self) -> int:
         # 获取装备商店主页
@@ -389,9 +395,8 @@ class IsekaiBot(BaseBot):
             return False
 
         print(f"[task_bot.IsekaiBot.task] [RepairEquipment] 检测装备损坏 ...")
-        if repair_func := self.repair_equipment():
-            print(f"[task_bot.IsekaiBot.task] [RepairEquipment] 正在修复装备 ...")
-            repair_func()
+        if self.repair_equipment():
+            print(f"[task_bot.IsekaiBot.task] [RepairEquipment] 已修复所有装备")
 
         print(f"[task_bot.IsekaiBot.task] [AllocateAttribute] 尝试加点 ...")
         if attr_allocated := self.attribute_point_allocation():
@@ -400,10 +405,15 @@ class IsekaiBot(BaseBot):
         battle_func()
         try:
             while True:
-                battle_with_skip_riddle(True, 0.1, "default")
+                battle_with_skip_riddle(True, self.config["task_bot"]["epsilon"], "default")
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
+
+        print(f"[task_bot.PersistentBot.task] [MarketBot] 在市场变卖物品 ...")
+        market_balance, items_sold = self.market_bot()
+        if market_balance:
+            print(f"[task_bot.PersistentBot.task] [MarketBot] 入账 {market_balance} Credits; 变卖了的物品: {items_sold}")
 
         print(f"[task_bot.IsekaiBot.task] [EquipmentStoreBot] 变卖装备 ...")
         if equipments_sold := self.equipment_store_bot():
@@ -419,7 +429,7 @@ def main():
     while True:
         if not any(bot.task() for bot in [persistent_bot, isekai_bot]):
             # This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery
-            for _ in tqdm(range(int(1810 - (time.time() - persistent_bot.last_encounter_time))), desc="Wait"):
+            for _ in tqdm(range(random.randint(1800, 1830)), desc="Wait"):
                 time.sleep(1)
         
 

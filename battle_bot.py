@@ -3,10 +3,11 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
-import json, pathlib, random, re, argparse, math, time
+import json, pathlib, random, re, argparse, math, time, requests
 from functools import partial
 from abc import ABC, abstractmethod
 from typing import Any, Literal
+from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError, AuthenticationConfig
 
@@ -90,6 +91,7 @@ class BattleBotConfig(BaseModel):
     spirit_supply_line: int = Field(description="Spirit 补给触发阈值，低于此值尝试恢复 Spirit")
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
+    pre_battle_magics: list[str] = Field(description="下一场战斗开始时，什么魔法应该可用，用于应对连续无休息的战斗")
     spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
     prof_mana_threshold: int = Field(ge=0, description="刷技能熟练度的蓝量门槛。高于此值则用非伤害技能刷熟练度，低于则直接攻击结束战斗")
     supportive_buff: bool = Field(description="使用 Supportivie 技能获得 Buff，以获得更高的 Mitigation, Action Speed, Evade Chance")
@@ -329,7 +331,9 @@ class BattleBot:
                 return action
 
     def __require_restore_before_end(self) -> bool:
-        require_restore = self.api.get_player_health() < self.config.pre_battle_health_reserve or self.api.get_player_mana() < self.config.pre_battle_mana_reserve
+        require_restore = self.api.get_player_health() < self.config.pre_battle_health_reserve
+        require_restore = require_restore or self.api.get_player_mana() < self.config.pre_battle_mana_reserve
+        require_restore = require_restore or not all(magic.available for magic in self.api.get_player_magics() if magic.name in self.config.pre_battle_magics)
         return self.__restore_before_end_flag and require_restore
 
     def __restore_before_end(self) -> BaseAction | None:
@@ -346,7 +350,9 @@ class BattleBot:
             for item_name in ["Mana Gem", "Mana Potion"]:
                 if action := self.__try_to_use("item", item_name):
                     return action
-            return ActionDefend()
+
+        # 等 CD 结束
+        return ActionDefend()
 
     def __grind_proficiency(self) -> BaseAction | None:
         # https://ehwiki.org/wiki/Proficiencies
@@ -474,8 +480,8 @@ class BattleBot:
         if sum(monster.health > 0 for monster in self.api.monsters) == 1:
             # 如果启用了结束前回复的模式，那么迷晕敌人，等待回复
             if self.__restore_before_end_flag:
-                if self.__require_restore_before_end() and (action := self.__restore_before_end()):
-                    return [(action, 0)]
+                if self.__require_restore_before_end():
+                    return [(self.__restore_before_end(), 0)]
             # 耍戏，提升属性熟练度
             elif self.api.get_player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
                 return [(action, 0)]
@@ -568,18 +574,36 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
 
 
 def battle_with_skip_riddle(*args, **kwargs):
+    saved_riddle = False
+
     while True:
         try:
             return battle(*args, **kwargs)
         except TokenNotFoundError as e:
-            if "function check_submit_button() {" in e.page:
-                # 如果遇到小马谜题，我们无法跳过，只能作答，或者等待谜题过期。Wiki 里说多选择一个错误的小马，比少选一个正确的小马的惩罚要大。谜题过期，也就是选择缺省值——谁都不选
-                # Selecting a pony that is not in the picture will count more severe towards a penalty than missing one pony - so when in doubt, best not to guess but leave one blank
-                # https://ehwiki.org/wiki/RiddleMaster
-                print("[battle_bot.battle_with_skip_riddle] 遇到小马谜题了！")
+            if "function check_submit_button() {" not in e.page:
+                raise e
+            if saved_riddle:
                 time.sleep(20)
                 continue
-            raise e
+            saved_riddle =True 
+
+            # Selecting a pony that is not in the picture will count more severe towards a penalty than missing one pony - so when in doubt, best not to guess but leave one blank
+            # https://ehwiki.org/wiki/RiddleMaster
+            # 提取图片和选项信息
+            soup = BeautifulSoup(e.page, "lxml")
+            image = requests.get(soup.find(id="riddleimage").find("img").attrs["src"]).content
+            pony_name_to_option = "\n".join(f"{option.text.strip()} -> {option.find('input').attrs['value']}" for option in soup.find(id="riddler1").find_all("div", recursive=False))
+
+            # 保存谜题图片和 AI 预测结果
+            riddle_dir = pathlib.Path("riddle/dataset/uncategorized")
+            riddle_dir.mkdir(exist_ok=True, parents=True)
+            riddle_index = max([0] + [int(file.stem) for file in riddle_dir.glob("*.jpg") if re.search(r"\d+", file.stem)]) + 1
+            (riddle_dir / f"{riddle_index}.jpg").write_bytes(image)
+            (riddle_dir.parent / "pony_name_to_option.txt").write_text(pony_name_to_option)
+
+            # 等待
+            print(f"[battle_bot.battle_with_skip_riddle] 遇到小马谜题了！已保存谜题图片和 AI 预测结果（如果有的话）到 {riddle_dir}")
+            time.sleep(20)
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
