@@ -5,7 +5,7 @@ model = YOLO("yolov8n.pt")
 # 训练
 model.train(
     data="dataset.yaml",
-    epochs=1,
+    epochs=8,
     imgsz=640,
     batch=16,
     device="cpu",

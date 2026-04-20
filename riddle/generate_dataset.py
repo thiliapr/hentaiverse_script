@@ -9,11 +9,11 @@ from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 
-BACKGROUND_COLOR = 215, 198, 170
 RIDDLE_IMAGE_SIZE = 1000, 550
-PONY_BRIGHTNESS = 32
+BACKGROUND_COLOR = 215, 198, 170
+PONY_BRIGHTNESS = 24
 ELLIPSE_BRIGHTNESS = 40
-RECTANGLE_BRIGHTNESS = 12
+RECTANGLE_BRIGHTNESS = 24
 BLACK_NOISE_BRIGHTNESS = 90
 
 
@@ -39,7 +39,7 @@ def random_merge(board: np.ndarray, pattern: np.ndarray, areas_to_avoid: set[tup
         cols += x
         valid_positions = list(zip(cols.tolist(), rows.tolist()))
 
-        if not areas_to_avoid or sum(position in areas_to_avoid for position in valid_positions) < len(valid_positions) / 16:
+        if not areas_to_avoid or sum(position in areas_to_avoid for position in valid_positions) < len(valid_positions) / 8:
             break
     else:
         raise TooManyRetriesError()
@@ -55,7 +55,7 @@ def random_merge(board: np.ndarray, pattern: np.ndarray, areas_to_avoid: set[tup
 
 def generate_riddle(portraits: list[tuple[str, Image.Image]]) -> tuple[Image.Image, list[tuple[str, tuple[int, int, int, int]]]]:
     # 创建画布
-    riddle_image = np.tile((np.random.normal(2, 3, 3) + np.array(BACKGROUND_COLOR, dtype=float))[None, None], (*reversed(RIDDLE_IMAGE_SIZE), 1))
+    riddle_image = np.tile((np.random.normal(10, 3, 3) + np.array(BACKGROUND_COLOR, dtype=float))[None, None], (*reversed(RIDDLE_IMAGE_SIZE), 1))
 
     # 把立绘加在画布上
     portrait_positions = []
@@ -65,7 +65,7 @@ def generate_riddle(portraits: list[tuple[str, Image.Image]]) -> tuple[Image.Ima
             # 缩放与旋转
             portrait = original_portrait.rotate(random.random() * 180, expand=True)
             portrait = portrait.crop(portrait.getbbox())
-            portrait = portrait.resize([random.randint(x * 1 // 4, x * 3 // 5) for x in RIDDLE_IMAGE_SIZE])
+            portrait = portrait.resize([int(x * (1 / 4 + random.random() * 1 / 4)) for x in RIDDLE_IMAGE_SIZE])
 
             # 随机翻转
             if random.random() > 0.5:
@@ -84,33 +84,33 @@ def generate_riddle(portraits: list[tuple[str, Image.Image]]) -> tuple[Image.Ima
 
             # 融入背景
             try:
-                portrait_positions.append((pony, random_merge(riddle_image, portrait * PONY_BRIGHTNESS, areas_to_avoid)))
+                portrait_positions.append((pony, random_merge(riddle_image, portrait * PONY_BRIGHTNESS * (3 / 8 * random.random() + 3 / 4), areas_to_avoid)))
                 break
             except (TooManyRetriesError, ValueError):
                 pass
 
     # 添加椭圆
     for _ in range(random.randint(10, 20)):
-        img = Image.new("L", [random.randint(10, 120) for _ in range(2)], "white")
-        ImageDraw.Draw(img).ellipse([0, 0, img.width, img.height], fill=random.choice([127, 254]), outline=0, width=2)
+        img = Image.new("L", [random.randint(10, 100) for _ in range(2)], "white")
+        ImageDraw.Draw(img).ellipse([0, 0, img.width, img.height], fill=random.choice([127, 254, 0]), outline=random.choice([0, 255]), width=2)
         img = np.array(img, dtype=float)
         empty_mask = img == 255
         half_mask = img == 254
         img = img / 255 - 1
         img[empty_mask] = 0
         img[half_mask] = 0.1
-        random_merge(riddle_image, img[..., None] * ELLIPSE_BRIGHTNESS)
+        random_merge(riddle_image, img[..., None] * ELLIPSE_BRIGHTNESS * (1 / 2 * random.random() + 3 / 4))
 
     # 添加矩形
-    for _ in range(random.randint(4, 8)):
+    for _ in range(random.randint(6, 10)):
         width, height = [random.randint(0, 400) for _ in range(2)]
         x, y = [random.randint(0, k) for k in [riddle_image.shape[1] - width, riddle_image.shape[0] - height]]
         riddle_image[y:y + height, x:x + width] -= RECTANGLE_BRIGHTNESS * (0.8 + random.random() * 0.4),
 
     # 添加噪声
     riddle_image -= np.random.normal(0, 10 + random.random() * 10, riddle_image.shape[:2])[..., None]
-    riddle_image[np.random.random(riddle_image.shape[:2]) > (0.975 + random.random() * 0.225)] -= BLACK_NOISE_BRIGHTNESS
-    riddle_image = gaussian_filter(riddle_image, sigma=0.99 + random.random() * 0.01)
+    riddle_image[np.random.random(riddle_image.shape[:2]) > (0.95 + random.random() * 0.049)] -= BLACK_NOISE_BRIGHTNESS
+    riddle_image = gaussian_filter(riddle_image, sigma=0.99 + random.random() * 0.009)
     riddle_image -= np.random.normal(0, 2, riddle_image.shape[:2])[..., None]
 
     # 合成谜题图片

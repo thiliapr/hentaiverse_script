@@ -91,7 +91,8 @@ class BattleBotConfig(BaseModel):
     spirit_supply_line: int = Field(description="Spirit 补给触发阈值，低于此值尝试恢复 Spirit")
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
     pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
-    pre_battle_magics: list[str] = Field(description="下一场战斗开始时，什么魔法应该可用，用于应对连续无休息的战斗")
+    pre_battle_magics: list[str] = Field(description="下一场战斗开始时，期望可用的魔法，用于应对连续无休息的战斗")
+    pre_battle_items: list[str] = Field(description="下一场战斗开始时，期望可用的魔法，用于应对连续无休息的战斗")
     spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
     prof_mana_threshold: int = Field(ge=0, description="刷技能熟练度的蓝量门槛。高于此值则用非伤害技能刷熟练度，低于则直接攻击结束战斗")
     supportive_buff: bool = Field(description="使用 Supportivie 技能获得 Buff，以获得更高的 Mitigation, Action Speed, Evade Chance")
@@ -334,6 +335,7 @@ class BattleBot:
         require_restore = self.api.get_player_health() < self.config.pre_battle_health_reserve
         require_restore = require_restore or self.api.get_player_mana() < self.config.pre_battle_mana_reserve
         require_restore = require_restore or not all(magic.available for magic in self.api.get_player_magics() if magic.name in self.config.pre_battle_magics)
+        require_restore = require_restore or not all(item.available for item in self.api.get_player_items() if item.name in self.config.pre_battle_items)
         return self.__restore_before_end_flag and require_restore
 
     def __restore_before_end(self) -> BaseAction | None:
