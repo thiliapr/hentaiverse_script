@@ -382,7 +382,7 @@ class IsekaiBot(BaseBot):
 
         soup = BeautifulSoup(page, "lxml")
         postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
-        for arena in reversed(soup.find(id="arena_list").find_all("tr")):
+        for arena in soup.find(id="arena_list").find_all("tr"):
             info = arena.find_all("td")
             if not info or "onclick" not in (start_button := info[-1].find("img")).attrs:
                 continue
@@ -410,10 +410,10 @@ class IsekaiBot(BaseBot):
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
 
-        print(f"[task_bot.PersistentBot.task] [MarketBot] 在市场变卖物品 ...")
+        print(f"[task_bot.IsekaiBot.task] [MarketBot] 在市场变卖物品 ...")
         market_balance, items_sold = self.market_bot()
         if market_balance:
-            print(f"[task_bot.PersistentBot.task] [MarketBot] 入账 {market_balance} Credits; 变卖了的物品: {items_sold}")
+            print(f"[task_bot.IsekaiBot.task] [MarketBot] 入账 {market_balance} Credits; 变卖了的物品: {items_sold}")
 
         print(f"[task_bot.IsekaiBot.task] [EquipmentStoreBot] 变卖装备 ...")
         if equipments_sold := self.equipment_store_bot():
