@@ -49,21 +49,31 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "equipment_store_bot": {
                "skipped_filters": ["Staffs", "Cloth"]
            },
-           "battle_bot_override": {
-               "encounter": {
-                   "supportive_buff": true
+           "battle": {
+               "Random Encounter": {
+                   "difficult_level": "2",
+                   "epsilon": 0,
+                   "battle_bot_override": {
+                       "mana_supply_line": 10,
+                       "elite_health_threshold": 19890604
+                   }
                },
-               "arena": {
+               "Arena": {
+                   "difficult_level": "1",
+                   "epsilon": 0.1,
+                   "battle_bot_override": {}
+               },
+               "Ring of Blood": {
+                   "difficult_level": "1",
+                   "epsilon": 0.1,
+                   "battle_bot_override": {}
                }
            },
-           "encounter_difficult_level": "3",
-           "arena_difficult_level": "1",
-           "arena_epsilon": 0.3,
            "training_henjutsu": ["Adept Learner", "Assimilator", "Scavenger", "Quartermaster", "Luck of the Draw", "Archaeologist"]
        }
    }
    ```
-2. 填写`world/isekai/config.json`填写类似配置，但是不用写`task_bot`项
+2. 填写`world/isekai/config.json`填写类似配置，但是不用写`task_bot.battle.{regex,(.+)}.difficult_level`和`training_henjutsu`项
 3. 运行`python task_bot.py`，大功告成
 
 ### 异世界

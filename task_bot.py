@@ -249,14 +249,13 @@ class PersistentBot(BaseBot):
         # | 60-99 | Great | +100% EXP but stamina drains 50% faster |
         if int(re.search(r"Stamina: (\d+)", page).group(1)) < 85:
             return
-        
+
         # 检测可用的 Arena，并筛选
         soup = BeautifulSoup(page, "lxml")
         battles = []
         for arena in soup.find(id="arena_list").find_all("tr"):
-            info = arena.find_all("td")
             # 跳过 Table Header 行和不可用战斗
-            if not info or "onclick" not in (start_button := info[-1].find("img")).attrs:
+            if not (info := arena.find_all("td")) or "onclick" not in (start_button := info[-1].find("img")).attrs:
                 continue
             # 获取战斗信息
             rounds = int(info[3].text)
@@ -266,7 +265,7 @@ class PersistentBot(BaseBot):
             api_data = {"initid": initid, "inittoken": inittoken}
             # 记录战斗
             battles.append((rounds, clear_bonus, api_data))
-        
+
         # 筛出奖励小于 1000 的战斗，并选择最优性价比的战斗
         battles = [battle for battle in battles if battle[1] >= 1000]
         if not battles:
@@ -275,6 +274,20 @@ class PersistentBot(BaseBot):
         battle_func = lambda: self.api_request(requests.post, url, data=best_battle_data)
         return battle_func
 
+    def ring_of_blood(self) -> Callable[[], Any] | None:
+        url = f"{self.main_url}/?s=Battle&ss=rb"
+        page = self.api_request(requests.get, url).text
+
+        soup = BeautifulSoup(page, "lxml")
+        for tr in soup.find(id="arena_list").find_all("tr"):
+            if not tr.find("td") or "onclick" not in (start_button := tr.find_all("td")[-1].find("img")).attrs:
+                continue
+
+            initid, entrycost, inittoken = re.search(r"init_battle\((\d+),(\d+),'(\w+)'\)", start_button.attrs["onclick"]).groups()
+            if int(entrycost) > 1:
+                continue
+            return lambda: self.api_request(requests.post, url, data={"initid": initid, "inittoken": inittoken})
+
     def task(self) -> bool:
         if self.config["task_bot"]["training_henjutsu"]:
             print(f"[task_bot.PersistentBot.task] [TrainHenjutsu] 尝试训练 Henjutsu ...")
@@ -282,11 +295,10 @@ class PersistentBot(BaseBot):
                 print(f"[task_bot.PersistentBot.task] [TrainHenjutsu] 成功开始训练 {henjutsu_trained}")
 
         print("[task_bot.PersistentBot.task] [LookForBattle] 检测战斗事件 ...")
-        battle_func = None
-        if battle_func := self.encounter():
-            event_type, difficult_level, epsilon, config_override = "随机遇敌事件", self.config["task_bot"]["encounter_difficult_level"], 0., self.config["task_bot"]["battle_bot_override"]["encounter"]
-        elif battle_func := self.arena():
-            event_type, difficult_level, epsilon, config_override = "Arena 战斗", self.config["task_bot"]["arena_difficult_level"], self.config["task_bot"]["arena_epsilon"], self.config["task_bot"]["battle_bot_override"]["arena"]
+        for event_type, func in [("Random Encounter", self.encounter), ("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
+            if battle_func := func():
+                battle_config = self.config["task_bot"]["battle"][event_type]
+                break
         else:
             return False
 
@@ -299,14 +311,14 @@ class PersistentBot(BaseBot):
             print(f"[task_bot.PersistentBot.task] [{event_type}] [AllocateAttribute] 已加 {attr_allocated} 个属性点")
 
         # 打印当前战斗事件，并设置难度
-        print(f"[task_bot.PersistentBot.task] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {difficult_level} ...")
-        self.settings(difficult_level)
+        print(f"[task_bot.PersistentBot.task] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {battle_config['difficult_level']} ...")
+        self.settings(battle_config['difficult_level'])
         print(f"[task_bot.PersistentBot.task] [{event_type}] [Battle] 开始战斗 ...")
         battle_func()
 
         try:
             while True:
-                battle_with_skip_riddle(False, epsilon, difficult_level, config_override)
+                battle_with_skip_riddle(False, battle_config["epsilon"], battle_config["difficult_level"], battle_config["battle_bot_override"])
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
@@ -374,24 +386,45 @@ class IsekaiBot(BaseBot):
 
         return equipments_sold
 
-    def arena(self) -> Callable[[], Any] | None:
-        url = f"{self.main_url}/?s=Battle&ss=ar"
+    def __get_arena_list(self, url: str) -> tuple[int, list[tuple[int, Callable[[], Any]]]]:
+        url = f"{self.main_url}/{url}"
         page = self.api_request(requests.get, url).text
-        if int(re.search(r"Stamina: (\d+)", page).group(1)) < 80:
-            return
+        stamina = int(re.search(r"Stamina: (\d+)", page).group(1))
 
         soup = BeautifulSoup(page, "lxml")
         postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
+        arena_list = []
         for arena in soup.find(id="arena_list").find_all("tr"):
             info = arena.find_all("td")
             if not info or "onclick" not in (start_button := info[-1].find("img")).attrs:
                 continue
-            initid = re.search(r"init_battle\((\d+),0\)", start_button.attrs["onclick"]).group(1)
-            return lambda: self.api_request(requests.post, url, data={"initid": initid, "postoken": postoken})
+            initid, entrycost = re.search(r"init_battle\((\d+),(\d+)\)", start_button.attrs["onclick"]).groups()
+            battle_func = lambda: self.api_request(requests.post, url, data={"initid": initid, "postoken": postoken})
+            arena_list.append(((int(entrycost), battle_func)))
+
+        return stamina, arena_list
+
+    def arena(self) -> Callable[[], Any] | None:
+        stamina, arena_list = self.__get_arena_list("?s=Battle&ss=ar")
+        if stamina < 80:
+            return
+        if arena_list:
+            return arena_list[0][1]
+
+    def ring_of_blood(self) -> Callable[[], Any] | None:
+        _, arena_list = self.__get_arena_list("?s=Battle&ss=rb")
+        for entrycost, battle_func in arena_list:
+            if entrycost > 1:
+                continue
+            return battle_func
 
     def task(self) -> bool:
         print("[task_bot.IsekaiBot.task] [LookForBattle] 检测战斗事件 ...")
-        if (battle_func := self.arena()) is None:
+        for event_type, func in [("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
+            if battle_func := func():
+                battle_config = self.config["task_bot"]["battle"][event_type]
+                break
+        else:
             return False
 
         print(f"[task_bot.IsekaiBot.task] [RepairEquipment] 检测装备损坏 ...")
@@ -405,7 +438,7 @@ class IsekaiBot(BaseBot):
         battle_func()
         try:
             while True:
-                battle_with_skip_riddle(True, self.config["task_bot"]["epsilon"], "default")
+                battle_with_skip_riddle(True, battle_config["epsilon"], "default", battle_config["battle_bot_override"])
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
