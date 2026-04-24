@@ -4,6 +4,7 @@
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
 import random, json, pathlib, time, re, requests
+from functools import partial
 from abc import ABC, abstractmethod
 from typing import Any
 from collections.abc import Callable
@@ -235,7 +236,7 @@ class PersistentBot(BaseBot):
         if (link_element := eventpane.find("a", href=True)) is None:
             return
 
-        battle_func = lambda: self.api_request(requests.get, link_element.attrs["href"])
+        battle_func = partial(self.api_request, requests.get, link_element.attrs["href"])
         return battle_func
 
     def arena(self) -> Callable[[], Any] | None:
@@ -271,7 +272,7 @@ class PersistentBot(BaseBot):
         if not battles:
             return
         best_battle_data = max(battles, key=lambda x: x[1] / x[0])[-1]
-        battle_func = lambda: self.api_request(requests.post, url, data=best_battle_data)
+        battle_func = partial(self.api_request, requests.post, url, data=best_battle_data)
         return battle_func
 
     def ring_of_blood(self) -> Callable[[], Any] | None:
@@ -286,7 +287,7 @@ class PersistentBot(BaseBot):
             initid, entrycost, inittoken = re.search(r"init_battle\((\d+),(\d+),'(\w+)'\)", start_button.attrs["onclick"]).groups()
             if int(entrycost) > 1:
                 continue
-            return lambda: self.api_request(requests.post, url, data={"initid": initid, "inittoken": inittoken})
+            return partial(self.api_request, requests.post, url, data={"initid": initid, "inittoken": inittoken})
 
     def task(self) -> bool:
         if self.config["task_bot"]["training_henjutsu"]:
@@ -395,11 +396,10 @@ class IsekaiBot(BaseBot):
         postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
         arena_list = []
         for arena in soup.find(id="arena_list").find_all("tr"):
-            info = arena.find_all("td")
-            if not info or "onclick" not in (start_button := info[-1].find("img")).attrs:
+            if not (info := arena.find_all("td")) or "onclick" not in (start_button := info[-1].find("img")).attrs:
                 continue
             initid, entrycost = re.search(r"init_battle\((\d+),(\d+)\)", start_button.attrs["onclick"]).groups()
-            battle_func = lambda: self.api_request(requests.post, url, data={"initid": initid, "postoken": postoken})
+            battle_func = partial(self.api_request, requests.post, url, data={"initid": initid, "postoken": postoken})
             arena_list.append(((int(entrycost), battle_func)))
 
         return stamina, arena_list
