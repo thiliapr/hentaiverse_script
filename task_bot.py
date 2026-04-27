@@ -12,7 +12,7 @@ from tqdm import tqdm
 from bs4 import BeautifulSoup
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
-from utils.battle import TokenNotFoundError
+from utils.battle import BattleResult, TokenNotFoundError
 from battle_bot import battle_with_skip_riddle
 
 
@@ -107,7 +107,7 @@ class BaseBot(ABC):
         return int(market_balance), items_sold
 
     @abstractmethod
-    def task(self) -> bool:
+    def task(self) -> tuple[str, BattleResult] | None:
         pass
 
 
@@ -289,7 +289,7 @@ class PersistentBot(BaseBot):
                 continue
             return partial(self.api_request, requests.post, url, data={"initid": initid, "inittoken": inittoken})
 
-    def task(self) -> bool:
+    def task(self) -> tuple[str, tuple[str, BattleResult]] | None:
         if self.config["task_bot"]["training_henjutsu"]:
             print(f"[task_bot.PersistentBot.task] [TrainHenjutsu] 尝试训练 Henjutsu ...")
             if henjutsu_trained := self.train_henjutsu():
@@ -301,7 +301,7 @@ class PersistentBot(BaseBot):
                 battle_config = self.config["task_bot"]["battle"][event_type]
                 break
         else:
-            return False
+            return
 
         print(f"[task_bot.PersistentBot.task] [{event_type}] [RepairEquipment] 检测装备损坏 ...")
         if self.repair_equipment():
@@ -319,7 +319,7 @@ class PersistentBot(BaseBot):
 
         try:
             while True:
-                battle_with_skip_riddle(False, battle_config["epsilon"], battle_config["difficult_level"], battle_config["battle_bot_override"])
+                battle_result = battle_with_skip_riddle(False, battle_config["epsilon"], battle_config["difficult_level"], battle_config["battle_bot_override"])
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
@@ -338,7 +338,7 @@ class PersistentBot(BaseBot):
             feed, attrs_upgraded = result
             print(f"[task_bot.PersistentBot.task] [MonsterLabBot] {feed=}, {attrs_upgraded=}")
 
-        return True
+        return event_type, battle_result
 
 
 class IsekaiBot(BaseBot):
@@ -418,14 +418,14 @@ class IsekaiBot(BaseBot):
                 continue
             return battle_func
 
-    def task(self) -> bool:
+    def task(self) -> tuple[str, BattleResult] | None:
         print("[task_bot.IsekaiBot.task] [LookForBattle] 检测战斗事件 ...")
         for event_type, func in [("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
             if battle_func := func():
                 battle_config = self.config["task_bot"]["battle"][event_type]
                 break
         else:
-            return False
+            return
 
         print(f"[task_bot.IsekaiBot.task] [RepairEquipment] 检测装备损坏 ...")
         if self.repair_equipment():
@@ -438,7 +438,7 @@ class IsekaiBot(BaseBot):
         battle_func()
         try:
             while True:
-                battle_with_skip_riddle(True, battle_config["epsilon"], "default", battle_config["battle_bot_override"])
+                battle_result = battle_with_skip_riddle(True, battle_config["epsilon"], "default", battle_config["battle_bot_override"])
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
@@ -452,7 +452,7 @@ class IsekaiBot(BaseBot):
         if equipments_sold := self.equipment_store_bot():
             print(f"[task_bot.IsekaiBot.task] [EquipmentStoreBot] 变卖了 {equipments_sold} 件装备")
 
-        return True
+        return event_type, battle_result
 
 
 def main():
@@ -460,11 +460,27 @@ def main():
     isekai_bot = IsekaiBot()
 
     while True:
-        if not any(bot.task() for bot in [persistent_bot, isekai_bot]):
-            # This battle event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery
+        for world, bot in [("Persistent", persistent_bot), ("Isekai", isekai_bot)]:
+            if result := bot.task():
+                break
+        else:
+            # Random Encounter event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery
             for _ in tqdm(range(random.randint(1800, 1830)), desc="Wait"):
                 time.sleep(1)
-        
+            continue
+
+        # 成功进行战斗后，记录战斗结果
+        event_type, battle_result = result
+        event_id = f"{world}:{event_type}"
+
+        task_log = {}
+        if (task_log_path := pathlib.Path(f"world/task_log.json")).exists():
+            task_log = json.loads(task_log_path.read_text("utf-8"))
+
+        log = task_log.setdefault("battle_result", {}).setdefault(event_id, {})
+        log[battle_result.name] = log.get(battle_result.name, 0) + 1
+
+        task_log_path.write_text(json.dumps(task_log, indent="\t"), "utf-8")
 
 
 if __name__ == "__main__":
