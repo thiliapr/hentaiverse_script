@@ -13,13 +13,14 @@ from bs4 import BeautifulSoup
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 from utils.battle import BattleResult, TokenNotFoundError
-from battle_bot import battle_with_skip_riddle
+from battle_bot import BattleWithRiddleAI, RiddleAIConfig
 
 
 class BaseBot(ABC):
     def init(self, config: dict[str, Any], main_url: str):
         self.main_url = main_url
         self.config = config
+        self.battle_with_riddle_ai = BattleWithRiddleAI(RiddleAIConfig.model_validate(config["riddle_ai"]))
         self.request_kwargs = {"cookies": {"ipb_member_id": config["authentication"]["ipb_member_id"], "ipb_pass_hash": config["authentication"]["ipb_pass_hash"]}, "headers": {"User-Agent": config["authentication"]["user_agent"]}}
 
     def api_request(self, *args, **kwargs):
@@ -319,7 +320,7 @@ class PersistentBot(BaseBot):
 
         try:
             while True:
-                battle_result = battle_with_skip_riddle(False, battle_config["epsilon"], battle_config["difficult_level"], battle_config["battle_bot_override"])
+                battle_result = self.battle_with_riddle_ai.battle(False, battle_config["epsilon"], battle_config["difficult_level"], battle_config["battle_bot_override"])
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
@@ -438,7 +439,7 @@ class IsekaiBot(BaseBot):
         battle_func()
         try:
             while True:
-                battle_result = battle_with_skip_riddle(True, battle_config["epsilon"], "default", battle_config["battle_bot_override"])
+                battle_result = self.battle_with_riddle_ai.battle(True, battle_config["epsilon"], "default", battle_config["battle_bot_override"])
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass

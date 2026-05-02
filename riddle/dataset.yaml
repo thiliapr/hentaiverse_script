@@ -3,4 +3,4 @@ train: images/train  # 训练图片相对路径
 val: images/val      # 验证图片相对路径
 
 nc: 6  # number of classes（6只小马）
-names: ['twilight_sparkle', 'rarity', 'fluttershy', 'rainbow_dash', 'pinkie_pie', 'applejack']
+names: ['Twilight Sparkle', 'Rarity', 'Fluttershy', 'Rainbow Dash', 'Pinkie Pie', 'Applejack']

@@ -210,4 +210,5 @@ __marimo__/
 world/
 riddle/dataset/
 riddle/*.pt
-riddle/run
+riddle/runs
+riddle/encountered

@@ -1,128 +1,233 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 thiliapr <thiliapr@tutanota.com>
+# SPDX-Package: hentaiverse_script
+# SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
+
 import re
 import json
 import random
 import pathlib
 import argparse
 import itertools
+from collections.abc import Callable
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
-from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 
 RIDDLE_IMAGE_SIZE = 1000, 550
-BACKGROUND_COLOR = 215, 198, 170
-PONY_BRIGHTNESS = 24
-ELLIPSE_BRIGHTNESS = 40
-RECTANGLE_BRIGHTNESS = 24
+PONY_BRIGHTNESS = 32
+ELLIPSE_SHADOW_BRIGHTNESS = 32
+TRIANGLE_SHADOW_BRIGHTNESS = 32
+RECTANGLE_SHADOW_BRIGHTNESS = 32
 BLACK_NOISE_BRIGHTNESS = 90
 
 
-class TooManyRetriesError(Exception):
-    pass
+class ImageDataLoader:
+    def __init__(self, images_dir: pathlib.Path, pin_memory: bool):
+        self.pin_memory = pin_memory
+        self.cache = {f: None for f in images_dir.rglob("*.*")}
+
+    @staticmethod
+    def process_image(image: Image.Image) -> np.ndarray:
+        return np.array(image.convert("L").resize(RIDDLE_IMAGE_SIZE), dtype=float)
+
+    def random_image(self) -> np.ndarray:            
+        if (image := self.cache[filepath := random.choice(list(self.cache.keys()))]) is None:
+            image = self.process_image(Image.open(filepath))
+            if self.pin_memory:
+                self.cache[filepath] = image
+        return image.copy()
 
 
-def random_merge(board: np.ndarray, pattern: np.ndarray, areas_to_avoid: set[tuple[int, int]] | None = None) -> tuple[int, int, int, int]:
-    for _ in range(10):
-        y, x = [random.randint(-object_length * 1 // 8, riddle_length - object_length * 7 // 8) for object_length, riddle_length in zip(pattern.shape[:2], board.shape)]
+class NoiseFactory:
+    # You must make sure that image is stored with dtype=float
+    @staticmethod
+    def gaussian_noise(image: np.ndarray, strength: float):
+        image += np.random.normal(scale=12 + 12 * strength, size=image.shape)
 
-        # 处理边界情况，裁剪立绘
-        real_pattern = pattern[max(-y, 0):, max(-x, 0):]
-        x, y = [max(k, 0) for k in [x, y]]
+    @staticmethod
+    def salt_pepper_noise(image: np.ndarray, strength: float):
+        prob = 0.01 + 0.04 * strength
+        random_map = np.random.random(image.shape)
+        image[random_map < prob] = 0
+        image[random_map > (1 - prob)] = 255
 
-        # 计算长宽，裁剪对象
-        height, width = [min(start + object_length, riddle_length) - start for object_length, riddle_length, start in zip(real_pattern.shape[:2], board.shape, [y, x])]
-        real_pattern = real_pattern[:height, :width]
+    @staticmethod
+    def poisson_noise(image: np.ndarray, strength: float):
+        lam = 0.3 + 0.7 * (1 - strength)
+        image[:] = np.random.poisson(np.clip(image, 0, 255) * lam) / lam
 
-        # 如果重叠部分比较小，就允许通过
-        rows, cols = np.where(np.sum(real_pattern, axis=-1) != 0)
-        rows += y
-        cols += x
-        valid_positions = list(zip(cols.tolist(), rows.tolist()))
+    @staticmethod
+    def multiplicative_noise(image: np.ndarray, strength: float):
+        image *= np.random.normal(1, 0.05 + 0.25 * strength, image.shape)
 
-        if not areas_to_avoid or sum(position in areas_to_avoid for position in valid_positions) < len(valid_positions) / 8:
-            break
-    else:
-        raise TooManyRetriesError()
+    @staticmethod
+    def gaussian_blur(image: np.ndarray, strength: float):
+        image[:] = cv2.GaussianBlur(image, (7, 7), 0.5 + 2.5 * strength)
 
-    # 与背景融合
-    board[y:y + height, x:x + width] += real_pattern
+    @staticmethod
+    def motion_blur(image: np.ndarray, strength: float):
+        # 创建一维运动核
+        kernel_size = 5 + 2 * int(7 * strength)
+        kernel_1d = np.linspace(0.1, 1.0, kernel_size) if random.randint(0, 1) else np.ones(kernel_size)
+        kernel_1d = kernel_1d / np.sum(kernel_1d)
 
-    # 如果指定，添加目前区域到避免重叠的区域集
-    if areas_to_avoid is not None:
-        areas_to_avoid.update(valid_positions)
-    return x, y, width, height
+        # 根据角度生成二维核的投影
+        shape = random.choice([(1, -1), (-1, 1)])
+        kernel = kernel_1d.reshape(*shape)
+
+        # 归一化并应用
+        kernel = kernel / np.sum(kernel)
+        image[:] = cv2.filter2D(image, -1, kernel)
+
+    @staticmethod
+    def downsample_upsample(image: np.ndarray, strength: float):
+        scale = 0.3 + 0.6 * (1 - strength)
+        h, w = image.shape
+        x = image
+        for new_w, new_h in [(int(w * scale), int(h * scale)), (w, h)]:
+            x = cv2.resize(x, (new_w, new_h), interpolation=random.choice([cv2.INTER_NEAREST, cv2.INTER_AREA]))
+        image[:] = x
+
+    @classmethod
+    def functions(cls) -> list[tuple[str, Callable[[np.ndarray, float], None]]]:
+        return [(name, getattr(NoiseFactory, name)) for name in [
+            "downsample_upsample",
+            "gaussian_blur",
+            "gaussian_noise",
+            "motion_blur",
+            "multiplicative_noise",
+            "poisson_noise",
+            "salt_pepper_noise"
+        ]]
 
 
-def generate_riddle(portraits: list[tuple[str, Image.Image]]) -> tuple[Image.Image, list[tuple[str, tuple[int, int, int, int]]]]:
-    # 创建画布
-    riddle_image = np.tile((np.random.normal(10, 3, 3) + np.array(BACKGROUND_COLOR, dtype=float))[None, None], (*reversed(RIDDLE_IMAGE_SIZE), 1))
+class RiddleGenerator:
+    def __init__(self, background_image_dir: pathlib.Path | None, image_pin_memory: bool):
+        self.background_image_loader = ImageDataLoader(background_image_dir, image_pin_memory)
 
-    # 把立绘加在画布上
-    portrait_positions = []
-    areas_to_avoid = set()
-    for pony, original_portrait in portraits:
-        while True:
-            # 缩放与旋转
-            portrait = original_portrait.rotate(random.random() * 180, expand=True)
-            portrait = portrait.crop(portrait.getbbox())
-            portrait = portrait.resize([int(x * (1 / 4 + random.random() * 1 / 4)) for x in RIDDLE_IMAGE_SIZE])
+    def generate_background(self) -> np.ndarray:
+        if random.random() < 0.9:
+            image = self.background_image_loader.random_image()
+            image = 64 + image / np.clip(image.max(), 1, 255) * 128
+        else:
+            image = np.full(tuple(reversed(RIDDLE_IMAGE_SIZE)), random.randint(100, 200), dtype=float)
+        return image
 
-            # 随机翻转
-            if random.random() > 0.5:
-                portrait = portrait.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    def add_noise(self, image: np.ndarray):
+        if random.random() < 0.1:
+            return
+        weights = [random.random() for _ in range(random.randint(1, len(NoiseFactory.functions())))]
+        weights = [weight / sum(weights) for weight in weights]
+        for weight, (_, func) in zip(weights, random.choices(NoiseFactory.functions(), k=len(weights))):
+            func(image, weight)
 
-            # 转换成数组
-            portrait = np.array(portrait, dtype=float)
+    def add_ponies(self, board: np.ndarray, portraits: list[Image.Image]) -> list[tuple[int, int, int, int]]:
+        pony_positions = []
+        for original_portrait in portraits:
+            while True:
+                # 随机缩放、旋转、翻转，并转换为 NumPy 数组
+                portrait = original_portrait.rotate(random.randint(1, 359), expand=True)
+                portrait = portrait.crop(portrait.getbbox())
+                portrait = portrait.resize([int(x * (1 / 4 + random.random() * 1 / 4)) for x in RIDDLE_IMAGE_SIZE])
+                if random.random() > 0.5:
+                    portrait = portrait.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                portrait = np.array(portrait, dtype=float)
 
-            # 标准化并变成灰度图
-            valid_mask = portrait[..., 3] == 255
-            portrait = portrait[..., :3]
-            portrait -= portrait[valid_mask].mean()
-            portrait /= portrait[valid_mask].std()
-            portrait = portrait.mean(-1)[..., None]
-            portrait[~valid_mask] = 0
+                # 标准化并变成灰度图
+                valid_mask = portrait[..., 3] == 255
+                portrait = portrait[..., :3]
+                portrait = (portrait - portrait[valid_mask].mean()) / portrait[valid_mask].std()
+                portrait = portrait.mean(-1)
+                portrait[~valid_mask] = 0
 
-            # 融入背景
-            try:
-                portrait_positions.append((pony, random_merge(riddle_image, portrait * PONY_BRIGHTNESS * (3 / 8 * random.random() + 3 / 4), areas_to_avoid)))
+                # 随机选取一个位置放置立绘，并处理边界情况，裁剪立绘
+                for _ in range(10):
+                    pattern_y, pattern_x = [random.randint(-object_length * 1 // 8, board_length - object_length * 7 // 8) for object_length, board_length in zip(portrait.shape[:2], reversed(RIDDLE_IMAGE_SIZE))]
+                    pattern = portrait[max(-pattern_y, 0):, max(-pattern_x, 0):]
+                    pattern_x, pattern_y = [max(k, 0) for k in [pattern_x, pattern_y]]
+                    pattern_height, pattern_width = [min(start + object_length, board_length) - start for object_length, board_length, start in zip(pattern.shape[:2], reversed(RIDDLE_IMAGE_SIZE), [pattern_y, pattern_x])]
+                    pattern = pattern[:pattern_height, :pattern_width]
+
+                    # 计算重叠部分，决定是否通过
+                    for area_x, area_y, area_width, area_height in pony_positions:
+                        overlay_width = max(0, min(pattern_x + pattern_width, area_x + area_width) - max(pattern_x, area_x))
+                        overlay_height = max(0, min(pattern_y + pattern_height, area_y + area_height) - max(pattern_y, area_y))
+                        if overlay_width * overlay_height > min(area_width * area_height, pattern_width * pattern_height) / 4:
+                            break
+                    else:
+                        break
+                else:
+                    # 如果试了若干次位置都放不下，说明立绘可能太大了，重新调整
+                    continue
                 break
-            except (TooManyRetriesError, ValueError):
-                pass
 
-    # 添加椭圆
-    for _ in range(random.randint(10, 20)):
-        img = Image.new("L", [random.randint(10, 100) for _ in range(2)], "white")
-        ImageDraw.Draw(img).ellipse([0, 0, img.width, img.height], fill=random.choice([127, 254, 0]), outline=random.choice([0, 255]), width=2)
-        img = np.array(img, dtype=float)
-        empty_mask = img == 255
-        half_mask = img == 254
-        img = img / 255 - 1
-        img[empty_mask] = 0
-        img[half_mask] = 0.1
-        random_merge(riddle_image, img[..., None] * ELLIPSE_BRIGHTNESS * (1 / 2 * random.random() + 3 / 4))
+            # 现在放置立绘
+            board[pattern_y:pattern_y + pattern_height, pattern_x:pattern_x + pattern_width] += pattern * (0.8 + 0.4 * random.random()) * PONY_BRIGHTNESS
+            pony_positions.append((pattern_x, pattern_y, pattern_width, pattern_height))
 
-    # 添加矩形
-    for _ in range(random.randint(6, 10)):
-        width, height = [random.randint(0, 400) for _ in range(2)]
-        x, y = [random.randint(0, k) for k in [riddle_image.shape[1] - width, riddle_image.shape[0] - height]]
-        riddle_image[y:y + height, x:x + width] -= RECTANGLE_BRIGHTNESS * (0.8 + random.random() * 0.4),
+        return pony_positions
 
-    # 添加噪声
-    riddle_image -= np.random.normal(0, 10 + random.random() * 10, riddle_image.shape[:2])[..., None]
-    riddle_image[np.random.random(riddle_image.shape[:2]) > (0.95 + random.random() * 0.049)] -= BLACK_NOISE_BRIGHTNESS
-    riddle_image = gaussian_filter(riddle_image, sigma=0.99 + random.random() * 0.009)
-    riddle_image -= np.random.normal(0, 2, riddle_image.shape[:2])[..., None]
+    def add_rectangle_shadow(self, board: np.ndarray):
+        width, height = [random.randint(board_length // 8, board_length // 4) for board_length in RIDDLE_IMAGE_SIZE]
+        x, y = [random.randint(0, board_length - pattern_length) for board_length, pattern_length in zip(RIDDLE_IMAGE_SIZE, (width, height))]
+        bright_or_dark = random.choice([1, -1])
+        brightness = (0.4 + 0.8 * random.random()) * RECTANGLE_SHADOW_BRIGHTNESS
+        board[y:y + height, x:x + width] += bright_or_dark * brightness
 
-    # 合成谜题图片
-    riddle_image = np.clip(riddle_image, 0, 255)
-    riddle_image = Image.fromarray(np.astype(riddle_image, np.uint8))
-    return riddle_image, portrait_positions
+    def add_non_rectangular_shadow(self, board: np.ndarray, pattern: Image.Image, brightness: float):
+        # 读取边界和内容
+        pattern = np.array(pattern)
+        outline_mask = pattern == 1
+        content_mask = pattern == 2
+        
+        # 构造图案
+        pattern = np.zeros_like(pattern, dtype=float)
+        pattern[outline_mask] = random.choice([1, -1])
+        pattern[content_mask] = random.choice([1, -1]) * (0.5 + 0.4 * random.random())
+
+        # 找个位置放上去
+        height, width = pattern.shape
+        x, y = [random.randint(0, board_length - pattern_length) for board_length, pattern_length in zip(RIDDLE_IMAGE_SIZE, (width, height))]
+        board[y:y + height, x:x + width] += pattern * brightness
+
+    def add_shadow(self, board: np.ndarray):
+        # 长方形阴影
+        for _ in range(random.randint(0, 16)):
+            self.add_rectangle_shadow(board)
+
+        # 椭圆阴影
+        for _ in range(random.randint(0, 16)):
+            pattern = Image.new("L", [random.randint(board_length // 8, board_length // 6) for board_length in RIDDLE_IMAGE_SIZE], 0)
+            ImageDraw.Draw(pattern).ellipse([0, 0, pattern.width, pattern.height], fill=2, outline=1, width=random.randint(0, 3))
+            self.add_non_rectangular_shadow(board, pattern, (0.8 + 0.4 * random.random()) * ELLIPSE_SHADOW_BRIGHTNESS)
+
+        # 三角形阴影
+        for _ in range(random.randint(0, 16)):
+            pattern = Image.new("L", [random.randint(board_length // 8, board_length // 6) for board_length in RIDDLE_IMAGE_SIZE], 0)
+            vertices = [(
+                random.randint(0, pattern.width) if edge in [0, 1] else ((edge - 2) * pattern.width),
+                random.randint(0, pattern.height) if edge in [2, 3] else (edge * pattern.height),
+            ) for edge in random.sample([0, 1, 2, 3], 3)]  # up, down, left, right
+            ImageDraw.Draw(pattern).polygon(vertices, fill=2, outline=1, width=random.randint(0, 3))
+            self.add_non_rectangular_shadow(board, pattern, (0.8 + 0.4 * random.random()) * TRIANGLE_SHADOW_BRIGHTNESS)
+
+    def generate_riddle(self, portraits: list[Image.Image]) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
+        riddle = self.generate_background()
+        pony_positions = self.add_ponies(riddle, portraits)
+        self.add_shadow(riddle)
+        self.add_noise(riddle)
+        riddle = Image.fromarray(np.clip(riddle, 0, 255).astype(np.uint8))
+        return riddle, pony_positions
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("trainset_proportion", type=float, help="训练集占数据集的比例")
     parser.add_argument("-n", "--count", type=int, default=1, help="为每种组合生成的谜题数量")
+    parser.add_argument("-b", "--background-dir", type=pathlib.Path, required=True, help="背景图片文件夹，用于谜题的背景")
+    parser.add_argument("-p", "--pin-memory", action="store_true", help="是否在内存储存背景图片以更快生成谜题，同时消耗更多内存")
     return parser.parse_args(args)
 
 
@@ -137,21 +242,24 @@ def main(args: argparse.Namespace):
     # 读取小马名字转 ID 表
     pony_to_id = json.loads(pathlib.Path("pony_to_id.json").read_text())
 
+    # 获取小马谜题生成器
+    riddle_generator = RiddleGenerator(args.background_dir, args.pin_memory)
+
     # 生成图片
     # https://ehwiki.org/wiki/RiddleMaster
     # This can be 1, 2 or 3 different ponies.
-    for ponies, data_split in tqdm([
-        [combination, data_split]
-        for num_ponies in range(1, 4)
+    for ponies in tqdm([
+        combination
+        for num_ponies in range(4)
         for combination in list(itertools.combinations_with_replacement(portraits.keys(), num_ponies))
-        for data_split in ["train" if random.random() < args.trainset_proportion else "val"]  # 在这里决定 data_split，防止同一组合的不同谜题落入训练集和验证集
         for _ in range(args.count)
     ]):
-        riddle_image, portrait_positions = generate_riddle([(pony, random.choice(portraits[pony])) for pony in ponies])
+        data_split = "train" if random.random() < args.trainset_proportion else "val"
+        riddle_image, portrait_positions = riddle_generator.generate_riddle([random.choice(portraits[pony]) for pony in ponies])
 
         # 拼凑标签
         label_text = []
-        for pony, (x, y, w, h) in portrait_positions:
+        for pony, (x, y, w, h) in zip(ponies, portrait_positions):
             center_x, center_y = [k + length / 2 for k, length in [(x, w), (y, h)]]
             center_x, center_y, w, h = [x / length for x, length in [(center_x, riddle_image.width), (center_y, riddle_image.height), (w, riddle_image.width), (h, riddle_image.height)]]
             label_text.append(f"{pony_to_id[pony]} {center_x} {center_y} {w} {h}")

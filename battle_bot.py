@@ -3,12 +3,14 @@
 # SPDX-Package: hentaiverse_script
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
+from PIL import Image
 import json, pathlib, random, re, argparse, math, time, requests
 from functools import partial
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
+from riddle.inference import InferenceToolkit
 from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError, AuthenticationConfig
 
 
@@ -575,37 +577,67 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
     return api.battle_result
 
 
-def battle_with_skip_riddle(*args, **kwargs):
-    saved_riddle = False
+class RiddleAIConfig(BaseModel):
+    threshold: float = Field(1, ge=0, le=1, description="AI 预测的置信度阈值，只有高于该阈值的预测才会被接受")
+    model_path: pathlib.Path = Field(description="AI 模型文件的路径")
 
-    while True:
-        try:
-            return battle(*args, **kwargs)
-        except TokenNotFoundError as e:
-            if "function check_submit_button() {" not in e.page:
-                raise e
-            if saved_riddle:
-                time.sleep(20)
-                continue
-            saved_riddle =True 
 
-            # Selecting a pony that is not in the picture will count more severe towards a penalty than missing one pony - so when in doubt, best not to guess but leave one blank
-            # https://ehwiki.org/wiki/RiddleMaster
+class BattleWithRiddleAI:
+    def __init__(self, config: RiddleAIConfig):
+        self.config = config
+        if self.config.threshold < 1:
+            self.tookit = InferenceToolkit(config.model_path)
+
+    def predict(self, image: bytes):
+        # returns ultralytics Results object
+        return self.tookit.predict([Image.frombytes(image)])[0]
+
+    def battle(self, *args, **kwargs):
+        is_riddle_saved = False
+
+        while True:
+            try:
+                return battle(*args, **kwargs)
+            except TokenNotFoundError as e:
+                if "function check_submit_button() {" not in e.page:
+                    raise e
+
             # 提取图片和选项信息
             soup = BeautifulSoup(e.page, "lxml")
             image = requests.get(soup.find(id="riddleimage").find("img").attrs["src"]).content
-            pony_name_to_option = "\n".join(f"{option.text.strip()} -> {option.find('input').attrs['value']}" for option in soup.find(id="riddler1").find_all("div", recursive=False))
+            pony_name_to_option = {option.text.strip(): option.find('input').attrs["value"] for option in soup.find(id="riddler1").find_all("div", recursive=False)}
 
-            # 保存谜题图片和 AI 预测结果
-            riddle_dir = pathlib.Path("riddle/dataset/uncategorized")
-            riddle_dir.mkdir(exist_ok=True, parents=True)
-            riddle_index = max([0] + [int(file.stem) for file in riddle_dir.glob("*.jpg") if re.search(r"\d+", file.stem)]) + 1
-            (riddle_dir / f"{riddle_index}.jpg").write_bytes(image)
-            (riddle_dir.parent / "pony_name_to_option.txt").write_text(pony_name_to_option)
+            # 保存谜题图片和页面
+            riddle_id = int(time.time())
+            if not is_riddle_saved:
+                if not (target_dir := pathlib.Path("riddle/encountered/original")).exists():
+                    target_dir.mkdir(parents=True)
+                (target_dir / f"{riddle_id}.jpg").write_bytes(image)
+                (target_dir / f"{riddle_id}.html").write_text(e.page, encoding="utf-8")
 
-            # 等待
-            print(f"[battle_bot.battle_with_skip_riddle] 遇到小马谜题了！已保存谜题图片和 AI 预测结果（如果有的话）到 {riddle_dir}")
-            time.sleep(20)
+            # AI 预测
+            print("[battle_bot.BattleWithRiddleAI.battle] 遇到小马谜题")
+            if self.config.threshold == 1:
+                is_riddle_saved = True
+                time.sleep(20)
+                continue
+
+            # This can be 1, 2 or 3 different ponies.
+            # https://ehwiki.org/wiki/RiddleMaster
+            results = self.predict(image)
+            selected = [pony_name_to_option[results.names.values[box.cls]] for box in results.boxes[:3] if box.conf > self.config.threshold]
+            if not selected:
+                is_riddle_saved = True
+                time.sleep(20)
+                continue
+
+            # 保存 AI 预测结果
+            print(f"[battle_bot.BattleWithRiddleAI.battle] AI 做出了预测")
+            if not is_riddle_saved:
+                if not (target_dir := pathlib.Path("riddle/encountered/with_prediction")).exists():
+                    target_dir.mkdir(parents=True)
+                results.save(target_dir / f"{riddle_id}.jpg")
+            is_riddle_saved = True
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -614,15 +646,17 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-e", "--epsilon", type=float, default=0., help="随机探索率，越大越激进，越小越保守")
     parser.add_argument("-l", "--loop", action="store_true", help="一直尝试进行战斗，直到找不到战斗")
     parser.add_argument("-d", "--difficult-level", default="default", help="这场战斗的难度等级。这会影响怪兽对玩家伤害的预测")
-    parser.add_argument("-s", "--skip-riddle", action="store_true", help="遇到小马谜题时，等待过期再继续战斗")
+    parser.add_argument("-r", "--riddle-ai", action="store_true", help="是否启用 AI 来解小马谜题。启用后，Bot 在遇到小马谜题时会使用 AI 来预测正确答案，并自动提交")
     return parser.parse_args(args)
 
 
 def main(args: argparse.Namespace):
     battle_args = args.isekai, args.epsilon, args.difficult_level
-    battle_func = partial(battle, *battle_args)
-    if args.skip_riddle:
-        battle_func = partial(battle_with_skip_riddle, *battle_args)
+    battle_func = battle
+    if args.riddle_ai:
+        config_path = pathlib.Path(f"world/{'isekai' if args.isekai else 'persistent'}/config.json")
+        battle_func = BattleWithRiddleAI(RiddleAIConfig.model_validate(json.loads(config_path.read_text("utf-8"))["riddle_ai"])).battle
+    battle_func = partial(battle_func, *battle_args)
 
     if args.loop:
         try:
