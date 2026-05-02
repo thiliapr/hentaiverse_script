@@ -236,6 +236,9 @@ class BattleAPI:
             # Arcane Blow hits Natsuiro Matsuri, which partially parries, causing 114514 points of Seiso damage.
             elif res := re.search(r"[\w ]+ [a-z]+s (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log):
                 (monster_name, _, damage), source = res.groups(), "action"
+            # You hit Natsuiro Matsuri, causing 8964 points of Seiso damage.
+            elif res := re.search(r"You [a-z]+ (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log):
+                (monster_name, _, damage), source = res.groups(), "action"
             # You drain 1919810 points of health from Natsuiro Matsuri.
             elif res := re.search(r"You drain (\d)+ points of health from (.+)", log):
                 (damage, monster_name), source = res.groups(), "effect"
