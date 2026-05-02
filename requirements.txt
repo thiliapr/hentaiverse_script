@@ -3,9 +3,7 @@ beautifulsoup4
 lxml
 pydantic
 tqdm
-torch
 pillow
 numpy
-scipy
 ultralytics
-opencv
+opencv-python
