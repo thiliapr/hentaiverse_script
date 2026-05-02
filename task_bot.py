@@ -396,7 +396,7 @@ class IsekaiBot(BaseBot):
         postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
         arena_list = []
         for arena in soup.find(id="arena_list").find_all("tr"):
-            if not (info := arena.find_all("td")) or "onclick" not in (start_button := info[-1].find("img")).attrs:
+            if not (info := arena.find_all("td")) or not (start_button := info[-1].find("img")) or "onclick" not in start_button.attrs:
                 continue
             initid, entrycost = re.search(r"init_battle\((\d+),(\d+)\)", start_button.attrs["onclick"]).groups()
             battle_func = partial(self.api_request, requests.post, url, data={"initid": initid, "postoken": postoken})
