@@ -90,7 +90,7 @@ class BattleBotConfig(BaseModel):
     mana_supply_line: int = Field(description="魔力补给触发阈值，低于此值尝试恢复魔力")
     spirit_supply_line: int = Field(description="Spirit 补给触发阈值，低于此值尝试恢复 Spirit")
     pre_battle_health_reserve: int = Field(gt=0, description="下一场战斗开始时的理想血量储备，用于应对连续无休息的战斗")
-    pre_battle_mana_reserve: int = Field(gt=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
+    pre_battle_mana_reserve: int = Field(ge=0, description="下一场战斗开始时的理想蓝量储备，用于应对连续无休息的战斗")
     pre_battle_magics: list[str] = Field(description="下一场战斗开始时，期望可用的魔法，用于应对连续无休息的战斗")
     pre_battle_items: list[str] = Field(description="下一场战斗开始时，期望可用的魔法，用于应对连续无休息的战斗")
     spark_trigger_spirit: int = Field(description="在 Spirit 达到该值时，使用 Spark of Life 技能")
