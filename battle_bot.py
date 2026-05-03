@@ -12,6 +12,8 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from riddle.inference import InferenceToolkit
 from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError, AuthenticationConfig
+from utils.constants import MAIN_URL
+from utils.network import request_with_retry
 
 
 class EWMAData(BaseModel):
@@ -583,10 +585,12 @@ class RiddleAIConfig(BaseModel):
 
 
 class BattleWithRiddleAI:
-    def __init__(self, config: RiddleAIConfig):
-        self.config = config
-        if self.config.threshold < 1:
-            self.tookit = InferenceToolkit(config.model_path)
+    def __init__(self, isekai: bool, ai_config: RiddleAIConfig, auth_config: AuthenticationConfig):
+        self.ai_config = ai_config
+        if self.ai_config.threshold < 1:
+            self.tookit = InferenceToolkit(ai_config.model_path)
+        self.auth_config = auth_config
+        self.main_url = f"{MAIN_URL}/{'isekai/' if isekai else ''}"
 
     def predict(self, image: bytes):
         # returns ultralytics Results object
@@ -602,6 +606,7 @@ class BattleWithRiddleAI:
                 if "function check_submit_button() {" not in e.page:
                     raise e
                 page = e.page
+            print("[battle_bot.BattleWithRiddleAI.battle] 遇到小马谜题")
 
             # 提取图片和选项信息
             soup = BeautifulSoup(page, "lxml")
@@ -617,28 +622,27 @@ class BattleWithRiddleAI:
                 (target_dir / f"{riddle_id}.html").write_text(page, encoding="utf-8")
 
             # AI 预测
-            print("[battle_bot.BattleWithRiddleAI.battle] 遇到小马谜题")
-            if self.config.threshold == 1:
+            skip_answer_flag = True
+            if self.ai_config.threshold == 1:
+                skip_answer_flag = True
+            else:
+                results = self.predict(image)
+                selected = [pony_name_to_option[results.names.values[box.cls]] for box in results.boxes[:3] if box.conf > self.ai_config.threshold]
+                skip_answer_flag = not selected
+            if skip_answer_flag:
                 is_riddle_saved = True
                 time.sleep(20)
                 continue
 
             # This can be 1, 2 or 3 different ponies.
             # https://ehwiki.org/wiki/RiddleMaster
-            results = self.predict(image)
-            selected = [pony_name_to_option[results.names.values[box.cls]] for box in results.boxes[:3] if box.conf > self.config.threshold]
-            if not selected:
-                is_riddle_saved = True
-                time.sleep(20)
-                continue
+            request_with_retry(self.main_url, data={"riddleanswer[]": selected, "riddlesubmit": "Submit Answer"}, cookies={"ipb_member_id": self.auth_config.ipb_member_id, "ipb_pass_hash": self.auth_config.ipb_pass_hash}, headers={"user_agent", self.auth_config.user_agent})
 
             # 保存 AI 预测结果
             print(f"[battle_bot.BattleWithRiddleAI.battle] AI 做出了预测")
-            if not is_riddle_saved:
-                if not (target_dir := pathlib.Path("riddle/encountered/with_prediction")).exists():
-                    target_dir.mkdir(parents=True)
-                results.save(target_dir / f"{riddle_id}.jpg")
-            is_riddle_saved = True
+            if not (target_dir := pathlib.Path("riddle/encountered/with_prediction")).exists():
+                target_dir.mkdir(parents=True)
+            results.save(target_dir / f"{riddle_id}.jpg")
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -656,7 +660,12 @@ def main(args: argparse.Namespace):
     battle_func = battle
     if args.riddle_ai:
         config_path = pathlib.Path(f"world/{'isekai' if args.isekai else 'persistent'}/config.json")
-        battle_func = BattleWithRiddleAI(RiddleAIConfig.model_validate(json.loads(config_path.read_text("utf-8"))["riddle_ai"])).battle
+        config = json.loads(config_path.read_text("utf-8"))
+        battle_func = BattleWithRiddleAI(
+            args.isekai,
+            RiddleAIConfig.model_validate(config["riddle_ai"]),
+            AuthenticationConfig.model_validate(config["authentication"])
+        ).battle
     battle_func = partial(battle_func, *battle_args)
 
     if args.loop:
