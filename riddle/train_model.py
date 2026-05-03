@@ -10,6 +10,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 训练
+    import pathlib
     from generate_dataset import RIDDLE_IMAGE_SIZE
     from ultralytics import YOLO
     model = YOLO()
@@ -23,7 +24,7 @@ if __name__ == "__main__":
         workers=args.workers,
         patience=args.patience,
         seed=19890604,
-        project="./runs",
+        project=pathlib.Path(__file__).parent / "runs",
         name="ckpt",
         exist_ok=True,
     )
