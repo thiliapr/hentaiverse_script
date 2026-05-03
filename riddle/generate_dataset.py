@@ -8,7 +8,6 @@ import json
 import random
 import pathlib
 import argparse
-import itertools
 from collections.abc import Callable
 import cv2
 import numpy as np
@@ -105,12 +104,20 @@ class NoiseFactory:
 
 
 class RiddleGenerator:
-    def __init__(self, background_image_dir: pathlib.Path | None, image_pin_memory: bool):
-        self.background_image_loader = ImageDataLoader(background_image_dir, image_pin_memory)
+    def __init__(self, portrait_dir: pathlib.Path, background_dir: pathlib.Path, image_pin_memory: bool):
+        # 读取小马立绘
+        self.portraits: dict[str, list[Image.Image]] = {}
+        for portrait_path in portrait_dir.rglob("*.*"):
+            pony_name = re.search(r"(.+)(\.\d+)", portrait_path.stem).group(1)
+            image = Image.open(portrait_path)
+            self.portraits.setdefault(pony_name, []).append(image)
+
+        # 创建背景图片加载器
+        self.background_loader = ImageDataLoader(background_dir, image_pin_memory)
 
     def generate_background(self) -> np.ndarray:
         if random.random() < 0.9:
-            image = self.background_image_loader.random_image()
+            image = self.background_loader.random_image()
             image = 64 + image / np.clip(image.max(), 1, 255) * 128
         else:
             image = np.full(tuple(reversed(RIDDLE_IMAGE_SIZE)), random.randint(100, 200), dtype=float)
@@ -131,7 +138,7 @@ class RiddleGenerator:
                 # 随机缩放、旋转、翻转，并转换为 NumPy 数组
                 portrait = original_portrait.rotate(random.randint(1, 359), expand=True)
                 portrait = portrait.crop(portrait.getbbox())
-                portrait = portrait.resize([int(x * (1 / 4 + random.random() * 1 / 4)) for x in RIDDLE_IMAGE_SIZE])
+                portrait = portrait.resize([int(x * (1 / 4 + 1 / 2 * random.random())) for x in RIDDLE_IMAGE_SIZE])
                 if random.random() > 0.5:
                     portrait = portrait.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                 portrait = np.array(portrait, dtype=float)
@@ -142,6 +149,9 @@ class RiddleGenerator:
                 portrait = (portrait - portrait[valid_mask].mean()) / portrait[valid_mask].std()
                 portrait = portrait.mean(-1)
                 portrait[~valid_mask] = 0
+
+                # 随机变亮/暗
+                portrait[valid_mask] += 2 - 4 * random.random()
 
                 # 随机选取一个位置放置立绘，并处理边界情况，裁剪立绘
                 for _ in range(10):
@@ -214,60 +224,52 @@ class RiddleGenerator:
             ImageDraw.Draw(pattern).polygon(vertices, fill=2, outline=1, width=random.randint(0, 3))
             self.add_non_rectangular_shadow(board, pattern, (0.8 + 0.4 * random.random()) * TRIANGLE_SHADOW_BRIGHTNESS)
 
-    def generate_riddle(self, portraits: list[Image.Image]) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
+    def generate_riddle(self) -> tuple[Image.Image, list[tuple[str, tuple[int, int, int, int]]]]:
+        ponies, portraits = [], []
+        if result := list(zip(*[(pony, random.choice(portrait_versions)) for pony, portrait_versions in random.sample(list(self.portraits.items()), k=random.randint(0, 3))])):
+            ponies, portraits = result
+        
         riddle = self.generate_background()
         pony_positions = self.add_ponies(riddle, portraits)
+        pony_labels = [(pony, position) for pony, position in zip(ponies, pony_positions, strict=True)]
         self.add_shadow(riddle)
         self.add_noise(riddle)
         riddle = Image.fromarray(np.clip(riddle, 0, 255).astype(np.uint8))
-        return riddle, pony_positions
+        return riddle, pony_labels
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("trainset_proportion", type=float, help="训练集占数据集的比例")
-    parser.add_argument("-n", "--count", type=int, default=1, help="为每种组合生成的谜题数量")
-    parser.add_argument("-b", "--background-dir", type=pathlib.Path, required=True, help="背景图片文件夹，用于谜题的背景")
+    parser.add_argument("-n", "--count", type=int, default=1, help="生成的谜题数量")
+    parser.add_argument("-d", "--portrait-dir", type=pathlib.Path, default=pathlib.Path("dataset/portrait"), help="小马立绘图片文件夹，默认为 %(default)s")
+    parser.add_argument("-b", "--background-dir", type=pathlib.Path, required=True, help="背景图片文件夹")
     parser.add_argument("-p", "--pin-memory", action="store_true", help="是否在内存储存背景图片以更快生成谜题，同时消耗更多内存")
     return parser.parse_args(args)
 
 
 def main(args: argparse.Namespace):
-    # 读取小马立绘
-    portraits = {}
-    for portrait_path in pathlib.Path("dataset/portrait").rglob("*.*"):
-        pony_name = re.search(r"(.+)(\.\d+)", portrait_path.stem).group(1)
-        image = Image.open(portrait_path)
-        portraits.setdefault(pony_name, []).append(image)
-
     # 读取小马名字转 ID 表
     pony_to_id = json.loads(pathlib.Path("pony_to_id.json").read_text())
 
     # 获取小马谜题生成器
-    riddle_generator = RiddleGenerator(args.background_dir, args.pin_memory)
+    riddle_generator = RiddleGenerator(args.portrait_dir, args.background_dir, args.pin_memory)
 
     # 生成图片
     # https://ehwiki.org/wiki/RiddleMaster
     # This can be 1, 2 or 3 different ponies.
-    for ponies in tqdm([
-        combination
-        for num_ponies in range(4)
-        for combination in list(itertools.combinations_with_replacement(portraits.keys(), num_ponies))
-        for _ in range(args.count)
-    ]):
-        data_split = "train" if random.random() < args.trainset_proportion else "val"
-        riddle_image, portrait_positions = riddle_generator.generate_riddle([random.choice(portraits[pony]) for pony in ponies])
+    for _ in tqdm(range(args.count)):
+        riddle_image, labels = riddle_generator.generate_riddle()
 
         # 拼凑标签
         label_text = []
-        for pony, (x, y, w, h) in zip(ponies, portrait_positions):
+        for pony, (x, y, w, h) in labels:
             center_x, center_y = [k + length / 2 for k, length in [(x, w), (y, h)]]
             center_x, center_y, w, h = [x / length for x, length in [(center_x, riddle_image.width), (center_y, riddle_image.height), (w, riddle_image.width), (h, riddle_image.height)]]
             label_text.append(f"{pony_to_id[pony]} {center_x} {center_y} {w} {h}")
         label_text = "\n".join(label_text)
 
         # 保存图片和标签
-        image_dir, label_dir = [pathlib.Path(f"dataset/{data_type}/{data_split}") for data_type in ["images", "labels"]]
+        image_dir, label_dir = [pathlib.Path(f"dataset/{data_type}/val") for data_type in ["images", "labels"]]
         for d in [image_dir, label_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
