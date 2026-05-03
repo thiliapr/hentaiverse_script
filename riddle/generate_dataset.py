@@ -16,11 +16,12 @@ from PIL import Image, ImageDraw
 from tqdm import tqdm
 
 RIDDLE_IMAGE_SIZE = 1000, 550
-PONY_BRIGHTNESS = 32
+PONY_BRIGHTNESS = 24
 ELLIPSE_SHADOW_BRIGHTNESS = 32
 TRIANGLE_SHADOW_BRIGHTNESS = 32
 RECTANGLE_SHADOW_BRIGHTNESS = 32
 BLACK_NOISE_BRIGHTNESS = 90
+OVERLAY_THRESHOLD = 2 / 3
 
 
 class ImageDataLoader:
@@ -154,7 +155,7 @@ class RiddleGenerator:
                     for area_x, area_y, area_width, area_height in pony_positions:
                         overlay_width = max(0, min(pattern_x + pattern_width, area_x + area_width) - max(pattern_x, area_x))
                         overlay_height = max(0, min(pattern_y + pattern_height, area_y + area_height) - max(pattern_y, area_y))
-                        if overlay_width * overlay_height > min(area_width * area_height, pattern_width * pattern_height) / 4:
+                        if overlay_width * overlay_height > min(area_width * area_height, pattern_width * pattern_height) * OVERLAY_THRESHOLD:
                             break
                     else:
                         break

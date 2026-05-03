@@ -15,7 +15,7 @@ class InferenceToolkit:
 def parse_args(args: list[str] | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument("filepath", type=pathlib.Path)
-    parser.add_argument("--model", type=pathlib.Path, default=pathlib.Path(__file__).parent / "runs/detect/ckpt/train/weights/best.pt")
+    parser.add_argument("--model", type=pathlib.Path, default=pathlib.Path(__file__).parent / "ckpt/train/weights/best.pt")
     return parser.parse_args(args)
 
 
