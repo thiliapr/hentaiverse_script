@@ -601,9 +601,10 @@ class BattleWithRiddleAI:
             except TokenNotFoundError as e:
                 if "function check_submit_button() {" not in e.page:
                     raise e
+                page = e.page
 
             # 提取图片和选项信息
-            soup = BeautifulSoup(e.page, "lxml")
+            soup = BeautifulSoup(page, "lxml")
             image = requests.get(soup.find(id="riddleimage").find("img").attrs["src"]).content
             pony_name_to_option = {option.text.strip(): option.find('input').attrs["value"] for option in soup.find(id="riddler1").find_all("div", recursive=False)}
 
@@ -613,7 +614,7 @@ class BattleWithRiddleAI:
                 if not (target_dir := pathlib.Path("riddle/encountered/original")).exists():
                     target_dir.mkdir(parents=True)
                 (target_dir / f"{riddle_id}.jpg").write_bytes(image)
-                (target_dir / f"{riddle_id}.html").write_text(e.page, encoding="utf-8")
+                (target_dir / f"{riddle_id}.html").write_text(page, encoding="utf-8")
 
             # AI 预测
             print("[battle_bot.BattleWithRiddleAI.battle] 遇到小马谜题")
