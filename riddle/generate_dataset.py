@@ -241,8 +241,8 @@ class RiddleGenerator:
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--count", type=int, default=1, help="生成的谜题数量")
-    parser.add_argument("-d", "--portrait-dir", type=pathlib.Path, default=pathlib.Path("dataset/portrait"), help="小马立绘图片文件夹，默认为 %(default)s")
-    parser.add_argument("-b", "--background-dir", type=pathlib.Path, required=True, help="背景图片文件夹")
+    parser.add_argument("-d", "--portrait-dir", type=pathlib.Path, default=pathlib.Path("dataset/portrait/"), help="小马立绘图片文件夹，默认为 %(default)s")
+    parser.add_argument("-b", "--background-dir", type=pathlib.Path, default=pathlib.Path("dataset/background/"), help="背景图片文件夹")
     parser.add_argument("-p", "--pin-memory", action="store_true", help="是否在内存储存背景图片以更快生成谜题，同时消耗更多内存")
     return parser.parse_args(args)
 

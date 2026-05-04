@@ -208,7 +208,7 @@ __marimo__/
 
 # HV Game
 world/
-riddle/dataset/
+riddle/dataset*
 riddle/*.pt
 riddle/ckpt
 riddle/encountered
