@@ -13,14 +13,18 @@ from bs4 import BeautifulSoup
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 from utils.battle import BattleResult, TokenNotFoundError
-from battle_bot import BattleWithRiddleAI, RiddleAIConfig
+from battle_bot import BattleWithRiddleAI, RiddleAIConfig, AuthenticationConfig
 
 
 class BaseBot(ABC):
-    def init(self, config: dict[str, Any], main_url: str):
-        self.main_url = main_url
+    def init(self, isekai: bool, config: dict[str, Any]):
+        self.main_url = f"{MAIN_URL}/{'isekai' if isekai else ''}"
         self.config = config
-        self.battle_with_riddle_ai = BattleWithRiddleAI(RiddleAIConfig.model_validate(config["riddle_ai"]))
+        self.battle_with_riddle_ai = BattleWithRiddleAI(
+            isekai,
+            RiddleAIConfig.model_validate(config["riddle_ai"]),
+            AuthenticationConfig.model_validate(config["authentication"]),
+        )
         self.request_kwargs = {"cookies": {"ipb_member_id": config["authentication"]["ipb_member_id"], "ipb_pass_hash": config["authentication"]["ipb_pass_hash"]}, "headers": {"User-Agent": config["authentication"]["user_agent"]}}
 
     def api_request(self, *args, **kwargs):
@@ -115,7 +119,7 @@ class BaseBot(ABC):
 class PersistentBot(BaseBot):
     def __init__(self):
         config = json.loads(pathlib.Path("world/persistent/config.json").read_text("utf-8"))
-        self.init(config, MAIN_URL)
+        self.init(False, config)
         self.encounter_cookies = {}
 
     def train_henjutsu(self) -> str | None:
@@ -345,7 +349,7 @@ class PersistentBot(BaseBot):
 class IsekaiBot(BaseBot):
     def __init__(self):
         config = json.loads(pathlib.Path("world/isekai/config.json").read_text("utf-8"))
-        self.init(config, f"{MAIN_URL}/isekai")
+        self.init(True, config)
 
     def repair_equipment(self) -> bool:
         url = f"{self.main_url}/?s=Bazaar&ss=am&screen=repair&filter=equipped"
