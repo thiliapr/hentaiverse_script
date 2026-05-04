@@ -3,7 +3,7 @@ import argparse
 
 def parse_args(args: list[str] | None = None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("-f", "--validation-frequency", type=int, default=2 ** 10, help="验证频率（每多少次训练步验证一次），默认为 %(default)s")
+    parser.add_argument("-f", "--validation-frequency", type=int, default=2 ** 6, help="验证频率（每多少次训练步验证一次），默认为 %(default)s")
     parser.add_argument("-r", "--validation-rounds", type=int, default=10, help="验证总轮数（即总共验证多少次），默认为 %(default)s")
     parser.add_argument("-b", "--batch-size", type=int, default=16, help="每个批次的样本数量，默认为 %(default)s")
     parser.add_argument("-d", "--device", type=int, action="append", default=[], help="使用的 CUDA 设备编号，不指定则代表使用 CPU")
@@ -133,7 +133,7 @@ def main(args: argparse.Namespace):
         seed=19890604,
         project=pathlib.Path(__file__).parent / "ckpt",
         exist_ok=True,
-        trainer=partial(RiddleTrainer, (args.validation_frequency, pony_to_id, {"portrait_dir": pathlib.Path("dataset/portrait"), "background_dir": pathlib.Path("dataset/background"), "image_pin_memory": False}))
+        trainer=partial(RiddleTrainer, (args.validation_frequency * args.batch_size, pony_to_id, {"portrait_dir": pathlib.Path("dataset/portrait"), "background_dir": pathlib.Path("dataset/background"), "image_pin_memory": False}))
     )
 
 
