@@ -18,6 +18,10 @@ from battle_bot import BattleWithRiddleAI, RiddleAIConfig, AuthenticationConfig
 
 class BaseBot(ABC):
     def init(self, isekai: bool, config: dict[str, Any]):
+        self.enabled = config["task_bot"]["enabled"]
+        if not self.enabled:
+            return
+
         self.main_url = f"{MAIN_URL}/{'isekai' if isekai else ''}"
         self.config = config
         self.battle_with_riddle_ai = BattleWithRiddleAI(
@@ -466,8 +470,9 @@ def main():
 
     while True:
         for world, bot in [("Persistent", persistent_bot), ("Isekai", isekai_bot)]:
-            if result := bot.task():
-                break
+            if bot.enabled:
+                if result := bot.task():
+                    break
         else:
             # Random Encounter event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery
             for _ in tqdm(range(random.randint(1800, 1830)), desc="Wait"):

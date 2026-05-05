@@ -46,6 +46,7 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
            "model_path": "riddle/runs/detect/ckpt/train/weights/best.pt"
        },
        "task_bot": {
+           "enabled": true,
            "market_bot": {
                "wanted_items": ["Health Draught", "Health Potion", "Mana Draught", "Mana Potion", "Spirit Draught", "Spirit Potion", "Scrap Cloth", "Scrap Wood"],
                "skipped_filters": ["Materials", "Trophies"]
