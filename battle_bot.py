@@ -4,7 +4,7 @@
 # SPDX-PackageHomePage: https://github.com/thiliapr/hentaiverse_script
 
 from PIL import Image
-import json, pathlib, random, re, argparse, math, time, requests
+import json, pathlib, random, re, argparse, math, winsound, time, requests
 from functools import partial
 from abc import ABC, abstractmethod
 from typing import Any, Literal
@@ -597,7 +597,7 @@ class BattleWithRiddleAI:
         return self.tookit.predict([Image.frombytes(image)])[0]
 
     def battle(self, *args, **kwargs):
-        is_riddle_saved = False
+        riddle_id = int(time.time())
 
         while True:
             try:
@@ -606,7 +606,7 @@ class BattleWithRiddleAI:
                 if "function check_submit_button() {" not in e.page:
                     raise e
                 page = e.page
-            print("[battle_bot.BattleWithRiddleAI.battle] 遇到小马谜题")
+            print("[battle_bot.BattleWithRiddleAI.battle] 遇到了小马谜题")
 
             # 提取图片和选项信息
             soup = BeautifulSoup(page, "lxml")
@@ -614,14 +614,12 @@ class BattleWithRiddleAI:
             pony_name_to_option = {option.text.strip(): option.find('input').attrs["value"] for option in soup.find(id="riddler1").find_all("div", recursive=False)}
 
             # 保存谜题图片和页面
-            riddle_id = int(time.time())
-            if not is_riddle_saved:
-                if not (target_dir := pathlib.Path("riddle/encountered/original")).exists():
-                    target_dir.mkdir(parents=True)
-                (target_dir / f"{riddle_id}.jpg").write_bytes(image)
-                (target_dir / f"{riddle_id}.html").write_text(page, encoding="utf-8")
+            if not (target_dir := pathlib.Path("riddle/encountered/original")).exists():
+                target_dir.mkdir(parents=True)
+            (target_dir / f"{riddle_id}.jpg").write_bytes(image)
+            (target_dir / f"{riddle_id}.html").write_text(page, encoding="utf-8")
 
-            # AI 预测
+            # 试图让 AI 预测
             skip_answer_flag = True
             if self.ai_config.threshold == 1:
                 skip_answer_flag = True
@@ -629,9 +627,13 @@ class BattleWithRiddleAI:
                 results = self.predict(image)
                 selected = [pony_name_to_option[results.names.values[box.cls]] for box in results.boxes[:3] if box.conf > self.ai_config.threshold]
                 skip_answer_flag = not selected
+
+            # 如果指定不预测/AI 预测失败，则提醒用户
             if skip_answer_flag:
-                is_riddle_saved = True
-                time.sleep(20)
+                print("[battle_bot.BattleWithRiddleAI.battle] [Warn] 没有检测到任何小马/未开启检测")
+                for pitch, duration in [(0, 1), (0, 1), (7, 1), (7, 1), (9, 1), (9, 1), (7, 2), (5, 1), (5, 1), (4, 1), (4, 1), (2, 1), (2, 1), (0, 2)]:
+                    winsound.Beep(440 * (2 ** (1 / 12)) ** pitch, duration * 1000)
+                time.sleep(4)
                 continue
 
             # This can be 1, 2 or 3 different ponies.
