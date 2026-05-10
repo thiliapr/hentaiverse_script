@@ -17,9 +17,9 @@ from battle_bot import BattleWithRiddleAI, RiddleAIConfig, AuthenticationConfig
 
 
 class BaseBot(ABC):
-    def init(self, isekai: bool, config: dict[str, Any]):
+    def init(self, isekai: bool, config: dict[str, Any], force: bool = False):
         self.enabled = config["task_bot"]["enabled"]
-        if not self.enabled:
+        if not self.enabled and not force:
             return
 
         self.main_url = f"{MAIN_URL}/{'isekai' if isekai else ''}"
@@ -121,9 +121,9 @@ class BaseBot(ABC):
 
 
 class PersistentBot(BaseBot):
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         config = json.loads(pathlib.Path("world/persistent/config.json").read_text("utf-8"))
-        self.init(False, config)
+        self.init(False, config, *args, **kwargs)
         self.encounter_cookies = {}
 
     def train_henjutsu(self) -> str | None:
@@ -351,9 +351,9 @@ class PersistentBot(BaseBot):
 
 
 class IsekaiBot(BaseBot):
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         config = json.loads(pathlib.Path("world/isekai/config.json").read_text("utf-8"))
-        self.init(True, config)
+        self.init(True, config, *args, **kwargs)
 
     def repair_equipment(self) -> bool:
         url = f"{self.main_url}/?s=Bazaar&ss=am&screen=repair&filter=equipped"
