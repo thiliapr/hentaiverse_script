@@ -494,7 +494,7 @@ class BattleBot:
 
         # 叠 Supportive Buff
         if self.config.supportive_buff:
-            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection")]:
+            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection"), ("Absorb", "Absorbing Ward"), ("Spirit Shield", "Spirit Shield"), ("Regen", "Regen")]:
                 if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
                     return [(action, 0)]
 
