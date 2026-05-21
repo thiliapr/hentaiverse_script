@@ -290,11 +290,14 @@ class BattleBot:
         # Protection	0.2?
         # https://ehwiki.org/wiki/Action_Speed
         action_scores = []
-        for magic_name in ["Cure", "Regen", "Haste", "Shadow Veil", "Absorb", "Spark of Life", "Arcane Focus", "Heartseeker", "Spirit Shield", "Protection"]:
-            if (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)) is None:
+        for magic in self.api.get_player_magics():
+            if not magic.available or magic.category not in ["magic_support", "magic_curative"]:
                 continue
+
+            action = ActionMagic(magic=magic, target=BattleAPI.PLAYER_ID)
             if (damage_to_player := self.__predict_damage_to_player(action.skill_id)) > self.api.get_player_health():
                 continue
+
             action_scores.append((action, (-damage_to_player, -action.magic.mana_cost)))
         if action_scores:
             return max(action_scores, key=lambda x: x[1])[0]
