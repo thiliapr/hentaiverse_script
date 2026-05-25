@@ -495,16 +495,17 @@ class BattleBot:
             elif self.api.get_player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
                 return [(action, 0)]
 
-        # 叠 Supportive Buff
-        if self.config.supportive_buff:
-            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection"), ("Absorb", "Absorbing Ward"), ("Spirit Shield", "Spirit Shield"), ("Regen", "Regen")]:
-                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
-                    return [(action, 0)]
-
         # 如果可以撑过这回合，并且 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
-        if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not BattleBot.__has_effect("Spark of Life", self.api.get_player_effects()):
+        has_spark_buff = BattleBot.__has_effect("Spark of Life", self.api.get_player_effects())
+        if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not has_spark_buff:
             if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
                 return [(action, 0)]
+
+        # 叠 Supportive Buff
+        if self.config.supportive_buff:
+            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection"), ("Absorb", "Absorbing Ward"), ("Regen", "Regen")] + ([] if has_spark_buff else [("Spirit Shield", "Spirit Shield")]):
+                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
+                    return [(action, 0)]
 
         # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
         bosses = [(monster_idx, monster) for monster_idx, monster in enumerate(self.api.monsters) if monster.health > self.config.elite_health_threshold]
@@ -620,7 +621,7 @@ class BattleWithRiddleAI:
             if not (target_dir := pathlib.Path("riddle/encountered/original")).exists():
                 target_dir.mkdir(parents=True)
             (target_dir / f"{riddle_id}.jpg").write_bytes(image)
-            (target_dir / f"{riddle_id}.html").write_text(page, encoding="utf-8")
+            # (target_dir / f"{riddle_id}.html").write_text(page, encoding="utf-8")
 
             # 试图让 AI 预测
             skip_answer_flag = True
