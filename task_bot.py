@@ -31,9 +31,45 @@ class BaseBot(ABC):
         )
         self.request_kwargs = {"cookies": {"ipb_member_id": config["authentication"]["ipb_member_id"], "ipb_pass_hash": config["authentication"]["ipb_pass_hash"]}, "headers": {"User-Agent": config["authentication"]["user_agent"]}}
 
+    # 工具方法
     def api_request(self, *args, **kwargs):
         return request_with_retry(*args, **kwargs, **self.request_kwargs)
 
+    @abstractmethod
+    def get_battle_func_from_onclick(self, onclick: str, url: str) -> Callable[[], Any]:
+        pass
+
+    def get_arena_list(self, url: str) -> tuple[int, list[tuple[dict[str, str | int | float], Callable[[], Any]]]]:
+        url = f"{self.main_url}/{url}"
+
+        # 获取网页并解析体力值
+        page = self.api_request(requests.get, url).text
+        stamina = int(re.search(r"Stamina: (\d+)", page).group(1))
+
+        # 解析 Arena 列表，并获取每个战斗的 API 信息
+        soup = BeautifulSoup(page, "lxml")
+        table_header = [label.text for label in soup.find(id="arena_list").find("tr").find_all("th")]
+        arena_list = []
+        for arena in soup.find(id="arena_list").find_all("tr")[1:]:
+            info = arena.find_all("td")
+            if not (start_button := info[-1].find("img")) or "onclick" not in start_button.attrs:
+                continue
+
+            # 获取开启战斗的函数
+            battle_func = self.get_battle_func_from_onclick(start_button.attrs["onclick"], url)
+
+            # 获取其他战斗信息
+            battle_info = {label: info[idx].text for idx, label in enumerate(table_header) if label}
+            battle_info["Min Level"] = int(battle_info["Min Level"].removeprefix("Lv. "))
+            battle_info["Rounds"] = int(battle_info["Rounds"])
+            battle_info["EXP Mod"] = float(battle_info["EXP Mod"].removeprefix("X"))
+            battle_info["Entry Cost"] = 0 if battle_info["Entry Cost"] == "-" else int(battle_info["Entry Cost"].split(" ")[0])
+            battle_info["Clear Bonus"] = int(battle_info["Clear Bonus"].replace(",", "").removesuffix(" C"))
+            arena_list.append((battle_info, battle_func))
+
+        return stamina, arena_list
+
+    # 自动化任务
     def attribute_point_allocation(self) -> int:
         # https://ehwiki.org/wiki/Character_Stats#Primary_Attributes
         url = f"{self.main_url}/?s=Character&ss=ch"
@@ -115,6 +151,20 @@ class BaseBot(ABC):
 
         return int(market_balance), items_sold
 
+    def arena(self) -> Callable[[], Any] | None:
+        stamina, arena_list = self.get_arena_list("?s=Battle&ss=ar")
+        if stamina < 80:
+            return
+        if arena_list:
+            return arena_list[-1][1]
+
+    def ring_of_blood(self) -> Callable[[], Any] | None:
+        _, arena_list = self.get_arena_list("?s=Battle&ss=rb")
+        for battle_info, battle_func in arena_list:
+            if battle_info["Entry Cost"] > 1:
+                continue
+            return battle_func
+
     @abstractmethod
     def task(self) -> tuple[str, BattleResult] | None:
         pass
@@ -126,6 +176,12 @@ class PersistentBot(BaseBot):
         self.init(False, config, *args, **kwargs)
         self.encounter_cookies = {}
 
+    # 抽象方法的实现
+    def get_battle_func_from_onclick(self, onclick: str, url: str) -> Callable[[], Any]:
+        initid, inittoken = re.search(r"init_battle\((\d+),\d+,'(\w+)'\)", onclick).groups()
+        return partial(self.api_request, requests.post, url, data={"initid": initid, "inittoken": inittoken})
+
+    # 自动化任务
     def train_henjutsu(self) -> str | None:
         url = f"{self.main_url}/?s=Character&ss=tr"
         soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
@@ -248,56 +304,6 @@ class PersistentBot(BaseBot):
         battle_func = partial(self.api_request, requests.get, link_element.attrs["href"])
         return battle_func
 
-    def arena(self) -> Callable[[], Any] | None:
-        # 每隔一个小时就会回复 1 点体力值，所以有体力的时候快去打 Arena 拿 Credit 吧
-        # https://ehwiki.org/wiki/Stamina
-        url = f"{self.main_url}/?s=Battle&ss=ar"
-        page = self.api_request(requests.get, url).text
-
-        # 获取体力值并检测是否符合条件
-        # | Stamina | Status | Effect |
-        # | 60-99 | Great | +100% EXP but stamina drains 50% faster |
-        if int(re.search(r"Stamina: (\d+)", page).group(1)) < 85:
-            return
-
-        # 检测可用的 Arena，并筛选
-        soup = BeautifulSoup(page, "lxml")
-        battles = []
-        for arena in soup.find(id="arena_list").find_all("tr"):
-            # 跳过 Table Header 行和不可用战斗
-            if not (info := arena.find_all("td")) or "onclick" not in (start_button := info[-1].find("img")).attrs:
-                continue
-            # 获取战斗信息
-            rounds = int(info[3].text)
-            clear_bonus = int(info[-2].text.replace(",", "").removesuffix(" C"))
-            # 获取战斗 API 信息
-            initid, inittoken = re.search(r"init_battle\((\d+),\d+,'(\w+)'\)", start_button.attrs["onclick"]).groups()
-            api_data = {"initid": initid, "inittoken": inittoken}
-            # 记录战斗
-            battles.append((rounds, clear_bonus, api_data))
-
-        # 筛出奖励小于 1000 的战斗，并选择最优性价比的战斗
-        battles = [battle for battle in battles if battle[1] >= 1000]
-        if not battles:
-            return
-        best_battle_data = max(battles, key=lambda x: x[1] / x[0])[-1]
-        battle_func = partial(self.api_request, requests.post, url, data=best_battle_data)
-        return battle_func
-
-    def ring_of_blood(self) -> Callable[[], Any] | None:
-        url = f"{self.main_url}/?s=Battle&ss=rb"
-        page = self.api_request(requests.get, url).text
-
-        soup = BeautifulSoup(page, "lxml")
-        for tr in soup.find(id="arena_list").find_all("tr"):
-            if not tr.find("td") or "onclick" not in (start_button := tr.find_all("td")[-1].find("img")).attrs:
-                continue
-
-            initid, entrycost, inittoken = re.search(r"init_battle\((\d+),(\d+),'(\w+)'\)", start_button.attrs["onclick"]).groups()
-            if int(entrycost) > 1:
-                continue
-            return partial(self.api_request, requests.post, url, data={"initid": initid, "inittoken": inittoken})
-
     def task(self) -> tuple[str, tuple[str, BattleResult]] | None:
         if self.config["task_bot"]["training_henjutsu"]:
             print(f"[task_bot.PersistentBot.task] [TrainHenjutsu] 尝试训练 Henjutsu ...")
@@ -306,8 +312,9 @@ class PersistentBot(BaseBot):
 
         print("[task_bot.PersistentBot.task] [LookForBattle] 检测战斗事件 ...")
         for event_type, func in [("Random Encounter", self.encounter), ("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
+            if (battle_config := self.config["task_bot"]["battle"][event_type])["difficult_level"] == "0":
+                continue
             if battle_func := func():
-                battle_config = self.config["task_bot"]["battle"][event_type]
                 break
         else:
             return
@@ -355,6 +362,12 @@ class IsekaiBot(BaseBot):
         config = json.loads(pathlib.Path("world/isekai/config.json").read_text("utf-8"))
         self.init(True, config, *args, **kwargs)
 
+    # 抽象方法的实现
+    def get_battle_func_from_onclick(self, onclick: str, url: str) -> Callable[[], Any]:
+        initid = re.search(r"init_battle\((\d+),\d+\)", onclick).group(1)
+        return partial(self.api_request, requests.post, url, data={"initid": initid})
+
+    # 自动化任务
     def repair_equipment(self) -> bool:
         url = f"{self.main_url}/?s=Bazaar&ss=am&screen=repair&filter=equipped"
         soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
@@ -395,37 +408,6 @@ class IsekaiBot(BaseBot):
             equipments_sold += len(equipments)
 
         return equipments_sold
-
-    def __get_arena_list(self, url: str) -> tuple[int, list[tuple[int, Callable[[], Any]]]]:
-        url = f"{self.main_url}/{url}"
-        page = self.api_request(requests.get, url).text
-        stamina = int(re.search(r"Stamina: (\d+)", page).group(1))
-
-        soup = BeautifulSoup(page, "lxml")
-        postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
-        arena_list = []
-        for arena in soup.find(id="arena_list").find_all("tr"):
-            if not (info := arena.find_all("td")) or not (start_button := info[-1].find("img")) or "onclick" not in start_button.attrs:
-                continue
-            initid, entrycost = re.search(r"init_battle\((\d+),(\d+)\)", start_button.attrs["onclick"]).groups()
-            battle_func = partial(self.api_request, requests.post, url, data={"initid": initid, "postoken": postoken})
-            arena_list.append(((int(entrycost), battle_func)))
-
-        return stamina, arena_list
-
-    def arena(self) -> Callable[[], Any] | None:
-        stamina, arena_list = self.__get_arena_list("?s=Battle&ss=ar")
-        if stamina < 80:
-            return
-        if arena_list:
-            return arena_list[0][1]
-
-    def ring_of_blood(self) -> Callable[[], Any] | None:
-        _, arena_list = self.__get_arena_list("?s=Battle&ss=rb")
-        for entrycost, battle_func in arena_list:
-            if entrycost > 1:
-                continue
-            return battle_func
 
     def task(self) -> tuple[str, BattleResult] | None:
         print("[task_bot.IsekaiBot.task] [LookForBattle] 检测战斗事件 ...")
