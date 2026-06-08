@@ -52,7 +52,8 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
                "skipped_filters": ["Materials", "Trophies"]
            },
            "equipment_store_bot": {
-               "skipped_filters": ["Staffs", "Cloth"]
+               "skipped_filters": ["Staffs", "Cloth"],
+               "skipped_qualities": ["Magnificent", "Legendary", "Peerless"]
            },
            "battle": {
                "Random Encounter": {

@@ -100,6 +100,8 @@ class BaseBot(ABC):
             # 遍历每一个物品
             equipments = []
             for equipment in soup.find(id="equiplist").find_all("tr", onclick=True):
+                if equipment.text in self.config["task_bot"]["equipment_store_bot"]["skipped_qualities"]:
+                    continue
                 equipments.append(re.search(r"hover_equip\((\d+)\)", equipment.attrs["onmouseover"]).group(1))
 
             # 卖出物品
