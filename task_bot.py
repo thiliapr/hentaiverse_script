@@ -70,6 +70,47 @@ class BaseBot(ABC):
         return stamina, arena_list
 
     # 自动化任务
+    def repair_equipment(self) -> bool:
+        url = f"{self.main_url}/?s=Bazaar&ss=am&screen=repair&filter=equipped"
+        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
+
+        # 如果存在至少一个装备损坏，就修复装备
+        equipments = []
+        for equipment in soup.find(id="equiplist").find_all("tr", onclick=True):
+            equipment_id = re.search(r"hover_equip\((\d+)\)", equipment.attrs["onmouseover"]).group(1)
+            equipments.append(equipment_id)
+        if not equipments:
+            return False
+        
+        # 网络请求
+        postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
+        self.api_request(requests.post, url, data={"postoken": postoken, "eqids[]": equipments, "replace_charms": "on"})
+        return True
+
+    def equipment_store_bot(self) -> int:
+        # 获取装备商店主页
+        soup = BeautifulSoup(self.api_request(requests.get, f"{self.main_url}/?s=Bazaar&ss=am&screen=sell").text, "lxml")
+        
+        # 卖掉各个过滤器下的物品
+        filters = [filter_element.attrs["href"] for filter_element in soup.find(id="filterbar").find_all("a", href=True)]
+        equipments_sold = 0
+        for href in tqdm(filters, desc="Sell Equipments"):
+            soup = BeautifulSoup(self.api_request(requests.get, href).text, "lxml")
+
+            # 遍历每一个物品
+            equipments = []
+            for equipment in soup.find(id="equiplist").find_all("tr", onclick=True):
+                equipments.append(re.search(r"hover_equip\((\d+)\)", equipment.attrs["onmouseover"]).group(1))
+
+            # 卖出物品
+            if not equipments:
+                continue
+            storetoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
+            self.api_request(requests.post, href, data={"postoken": storetoken, "eqids[]": equipments})
+            equipments_sold += len(equipments)
+
+        return equipments_sold
+
     def attribute_point_allocation(self) -> int:
         # https://ehwiki.org/wiki/Character_Stats#Primary_Attributes
         url = f"{self.main_url}/?s=Character&ss=ch"
@@ -204,16 +245,6 @@ class PersistentBot(BaseBot):
             self.api_request(requests.post, url, data={"start_train": subject_id, "cancel_train": "0"})
             return henjutsu_name
 
-    def repair_equipment(self) -> bool:
-        url = f"{self.main_url}/?s=Forge&ss=re"
-        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
-
-        # 如果存在至少一个装备损坏，就修复装备
-        if soup.find(class_="equiplist").find(class_="eqp"):
-            self.api_request(requests.post, url, data={"repair_all": "1"})
-            return True
-        return False
-
     def settings(self, difficult_level: str):
         url = f"{self.main_url}/?s=Character&ss=se"
         soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
@@ -228,32 +259,6 @@ class PersistentBot(BaseBot):
 
         # 更改设置
         self.api_request(requests.post, url, data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"})
-
-    def equipment_store_bot(self) -> int:
-        # 获取装备商店主页
-        soup = BeautifulSoup(self.api_request(requests.get, f"{self.main_url}/?s=Bazaar&ss=es").text, "lxml")
-        
-        # 卖掉各个过滤器下的物品
-        filters = [filter_element.attrs["href"] for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in self.config["task_bot"]["equipment_store_bot"]["skipped_filters"]]
-        equipments_sold = 0
-        for href in tqdm(filters, desc="Sell Equipments"):
-            soup = BeautifulSoup(self.api_request(requests.get, href).text, "lxml")
-
-            # 遍历每一个物品
-            equipments = []
-            for equipment in soup.find(id="item_pane").find(class_="equiplist").find_all(class_="eqp"):
-                if not (sell_button := equipment.find(attrs={"data-locked": "0"})):
-                    continue
-                equipments.append(re.search(r"equips.set\((\d+),'item_pane',\d+,\d+\)", sell_button.attrs["onmouseover"]).group(1))
-
-            # 卖出物品
-            if not equipments:
-                continue
-            storetoken = soup.find("input", attrs={"name": "storetoken"}).attrs["value"]
-            self.api_request(requests.post, href, data={"storetoken": storetoken, "select_group": "item_pane", "select_eids": ",".join(equipments)})
-            equipments_sold += len(equipments)
-
-        return equipments_sold
 
     def monster_lab_bot(self) -> tuple[bool, int]:
         url = f"{self.main_url}/?s=Bazaar&ss=ml"
@@ -368,47 +373,6 @@ class IsekaiBot(BaseBot):
         return partial(self.api_request, requests.post, url, data={"initid": initid})
 
     # 自动化任务
-    def repair_equipment(self) -> bool:
-        url = f"{self.main_url}/?s=Bazaar&ss=am&screen=repair&filter=equipped"
-        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
-
-        # 如果存在至少一个装备损坏，就修复装备
-        equipments = []
-        for equipment in soup.find(id="equiplist").find_all("tr", onclick=True):
-            equipment_id = re.search(r"hover_equip\((\d+)\)", equipment.attrs["onmouseover"]).group(1)
-            equipments.append(equipment_id)
-        if not equipments:
-            return False
-        
-        # 网络请求
-        postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
-        self.api_request(requests.post, url, data={"postoken": postoken, "eqids[]": equipments, "replace_charms": "on"})
-        return True
-
-    def equipment_store_bot(self) -> int:
-        # 获取装备商店主页
-        soup = BeautifulSoup(self.api_request(requests.get, f"{self.main_url}/?s=Bazaar&ss=am&screen=sell").text, "lxml")
-        
-        # 卖掉各个过滤器下的物品
-        filters = [filter_element.attrs["href"] for filter_element in soup.find(id="filterbar").find_all("a", href=True)]
-        equipments_sold = 0
-        for href in tqdm(filters, desc="Sell Equipments"):
-            soup = BeautifulSoup(self.api_request(requests.get, href).text, "lxml")
-
-            # 遍历每一个物品
-            equipments = []
-            for equipment in soup.find(id="equiplist").find_all("tr", onclick=True):
-                equipments.append(re.search(r"hover_equip\((\d+)\)", equipment.attrs["onmouseover"]).group(1))
-
-            # 卖出物品
-            if not equipments:
-                continue
-            storetoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
-            self.api_request(requests.post, href, data={"postoken": storetoken, "eqids[]": equipments})
-            equipments_sold += len(equipments)
-
-        return equipments_sold
-
     def task(self) -> tuple[str, BattleResult] | None:
         print("[task_bot.IsekaiBot.task] [LookForBattle] 检测战斗事件 ...")
         for event_type, func in [("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
