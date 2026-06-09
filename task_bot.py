@@ -104,7 +104,6 @@ class BaseBot(ABC):
                     continue
                 if equipment.attrs.get("data-eqprotect") == "1":
                     continue
-                print(equipment.text)
                 equipments.append(re.search(r"hover_equip\((\d+)\)", equipment.attrs["onmouseover"]).group(1))
 
             # 卖出物品
