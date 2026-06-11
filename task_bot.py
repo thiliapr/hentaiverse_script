@@ -100,7 +100,7 @@ class BaseBot(ABC):
             # 遍历每一个物品
             equipments = []
             for equipment in soup.find(id="equiplist").find_all("tr", onclick=True):
-                if any(quality in equipment.text for quality in self.config["task_bot"]["equipment_store_bot"]["skipped_qualities"]):
+                if any(quality in equipment.text for quality in self.config["task_bot"].get("equipment_store_bot", {}).get("skipped_qualities", [])):
                     continue
                 if equipment.attrs.get("data-eqprotect") == "1":
                     continue
