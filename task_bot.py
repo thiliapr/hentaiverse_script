@@ -35,10 +35,6 @@ class BaseBot(ABC):
     def api_request(self, *args, **kwargs):
         return request_with_retry(*args, **kwargs, **self.request_kwargs)
 
-    @abstractmethod
-    def get_battle_func_from_onclick(self, onclick: str, url: str) -> Callable[[], Any]:
-        pass
-
     def get_arena_list(self, url: str) -> tuple[int, list[tuple[dict[str, str | int | float], Callable[[], Any]]]]:
         url = f"{self.main_url}/{url}"
 
@@ -56,7 +52,9 @@ class BaseBot(ABC):
                 continue
 
             # 获取开启战斗的函数
-            battle_func = self.get_battle_func_from_onclick(start_button.attrs["onclick"], url)
+            initid = re.search(r"init_battle\((\d+),\d+\)", start_button.attrs["onclick"]).group(1)
+            postoken = soup.find("input", attrs={"name": "postoken"}).attrs["value"]
+            battle_func = partial(self.api_request, requests.post, url, data={"initid": initid, "postoken": postoken})
 
             # 获取其他战斗信息
             battle_info = {label: info[idx].text for idx, label in enumerate(table_header) if label}
@@ -221,11 +219,6 @@ class PersistentBot(BaseBot):
         self.init(False, config, *args, **kwargs)
         self.encounter_cookies = {}
 
-    # 抽象方法的实现
-    def get_battle_func_from_onclick(self, onclick: str, url: str) -> Callable[[], Any]:
-        initid, inittoken = re.search(r"init_battle\((\d+),\d+,'(\w+)'\)", onclick).groups()
-        return partial(self.api_request, requests.post, url, data={"initid": initid, "inittoken": inittoken})
-
     # 自动化任务
     def train_henjutsu(self) -> str | None:
         url = f"{self.main_url}/?s=Character&ss=tr"
@@ -370,11 +363,6 @@ class IsekaiBot(BaseBot):
     def __init__(self, *args, **kwargs):
         config = json.loads(pathlib.Path("world/isekai/config.json").read_text("utf-8"))
         self.init(True, config, *args, **kwargs)
-
-    # 抽象方法的实现
-    def get_battle_func_from_onclick(self, onclick: str, url: str) -> Callable[[], Any]:
-        initid = re.search(r"init_battle\((\d+),\d+\)", onclick).group(1)
-        return partial(self.api_request, requests.post, url, data={"initid": initid})
 
     # 自动化任务
     def task(self) -> tuple[str, BattleResult] | None:
