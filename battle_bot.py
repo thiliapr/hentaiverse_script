@@ -233,6 +233,7 @@ class BattleBot:
         targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
         window = list(enumerate(self.api.monsters))[monster_idx - targets_up:monster_idx + targets_down + 1]
         window = [(idx, monster) for idx, monster in window if monster.health > 0]
+        player_alive = not self.api.get_player_health() <= self.__predict_damage_to_player(skill_id)
 
         # 从历史数据预测伤害，计算指标
         raw_damage_dealt = {idx: self.__predict_damage_to_monster(skill_id, monster) for idx, monster in window}
@@ -250,7 +251,7 @@ class BattleBot:
             alive = len(self.__get_alive_monsters())
             leave_one_alive = alive - will_die == 1, alive - len(window) == 1
 
-        return leave_one_alive, will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
+        return player_alive, leave_one_alive, will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
 
     def __try_to_use(self, category: Literal["magic", "item"], name: str, **kwargs) -> ActionItem | ActionMagic | None:
         if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
