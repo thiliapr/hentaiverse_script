@@ -27,8 +27,10 @@ class EWMAData(BaseModel):
         self.weighted_sum = self.weighted_sum * self.multiplier + new_value
         self.total_weight = self.total_weight * self.multiplier + 1
 
-    def get_current_average(self) -> float:
-        return self.weighted_sum / self.total_weight
+    def get_current_average(self, default: float = 0.0) -> float:
+        return self.weighted_sum / self.total_weight if self.total_weight > 0 else default
+
+EmptyEWMAData = EWMAData()
 
 
 class GameData(BaseModel):
@@ -142,25 +144,17 @@ class BattleBot:
         return [(idx, monster) for idx, monster in enumerate(self.api.monsters) if monster.health]
 
     def __predict_damage_to_monster(self, skill_id: str, monster: Monster) -> float:
-        if skill_id not in (database := self.game_data.skill_damage_base):
-            return 19890604
-        skill_base_damage = database[skill_id].get_current_average()
-
-        multiplier = 1
-        if (key := f"{skill_id}@{monster.monster_id}") in (database := self.game_data.skill_monster_damage_multiplier):
-            multiplier = database[key].get_current_average()
+        skill_base_damage = self.game_data.skill_damage_base.get(skill_id, EmptyEWMAData).get_current_average(19890604)
+        multiplier = self.game_data.skill_monster_damage_multiplier.get(f"{skill_id}@{monster.monster_id}", EmptyEWMAData).get_current_average(1)
         return skill_base_damage * multiplier
 
     def __predict_recovery_amount(self, skill_id: str) -> int:
         return self.game_data.skill_recovery_amount.get(skill_id, 19890604)
 
     def __predict_damage_to_player(self, skill_id: str) -> float:
-        reaction_monsters_ratio = each_damage = 0.
         active_monsters = sum(not BattleBot.__has_effect("Asleep", monster.effects) for _, monster in self.__get_alive_monsters())
-        if skill_id in (database := self.game_data.skill_reaction_monsters_ratio):
-            reaction_monsters_ratio = database[skill_id].get_current_average()
-        if (database := self.game_data.monster_damage_to_player).total_weight:
-            each_damage = database.get_current_average()
+        reaction_monsters_ratio = self.game_data.skill_reaction_monsters_ratio.get(skill_id, EmptyEWMAData).get_current_average(0)
+        each_damage = self.game_data.monster_damage_to_player.get_current_average(0)
         return active_monsters * reaction_monsters_ratio * each_damage
 
     def __update_attack_data(self, action: ActionMagic | ActionAttack, textlog: list[str]):
@@ -503,7 +497,10 @@ class BattleBot:
 
         # 叠 Supportive Buff
         if self.config.supportive_buff:
-            for magic_name, effect_name in [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection"), ("Absorb", "Absorbing Ward"), ("Regen", "Regen")] + ([] if has_spark_buff else [("Spirit Shield", "Spirit Shield")]):
+            for magic_name, effect_name in sorted(
+                [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection"), ("Absorb", "Absorbing Ward"), ("Regen", "Regen")] + ([] if has_spark_buff else [("Spirit Shield", "Spirit Shield")]),
+                key=lambda x: self.__predict_damage_to_player(f"Magic:{x[0]}")
+            ):
                 if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
                     return [(action, 0)]
 
