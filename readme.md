@@ -4,7 +4,7 @@
 ## 许可证
 ![GNU AGPL Version 3 Logo](https://www.gnu.org/graphics/agplv3-with-text-162x68.png)
 
-thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许可证第 3 版或任何后续版本](https://www.gnu.org/licenses/agpl-3.0.html)。你可以自由地使用、修改和分发。
+thiliapr/hentaiverse_script 是自由软件(Free as in Freedom)，遵循 [Affero GNU 通用公共许可证第 3 版或任何后续版本](https://www.gnu.org/licenses/agpl-3.0.html)。你享有运行、研究和修改、分发修改前后的拷贝的自由，详情请参见 [什么是自由软件？](https://www.gnu.org/philosophy/free-sw.html)
 
 ## 写这个 API 的理由
 前作[hentaiverse_battle_bot](https://github.com/thiliapr/hentaiverse_battle_bot/)太混乱了，耦合度极高，加个功能都不知道怎么加。  
@@ -90,3 +90,15 @@ thiliapr/hentaiverse_script 是自由软件，遵循 [Affero GNU 通用公共许
 
 ## 怎么写自己的脚本
 请参考`battle_bot.py`的内容和`utils/battle.py`的`BattleAPI`类的方法
+
+## 私货
+- plz，看看这些文章
+  - [Tivoization（硬件自锁技术）](https://www.gnu.org/philosophy/tivoization.html)
+    - 臭名昭著的 [Android](https://zh.wikipedia.org/wiki/Android) 的 BootLoader 锁就是一个典型案例 
+  - [Android 和用户的自由](https://www.gnu.org/philosophy/android-and-users-freedom.html)
+  - [Linux、GNU和自由](https://www.gnu.org/philosophy/linux-gnu-freedom.html)
+  - [让软件免受专利困扰](https://www.gnu.org/philosophy/limit-patent-effect.html)
+  - [对版权的误解—一系列的错误](https://www.gnu.org/philosophy/misinterpreting-copyright.html)
+  - [重新审视版权制度：公众利益应居首位](https://www.gnu.org/philosophy/reevaluating-copyright.html)
+  - [还在用“知识产权”这词吗？它只是看上去很美](https://www.gnu.org/philosophy/not-ipr.html)
+  - [别让 “知识产权” 扭曲你的价值观](https://www.gnu.org/philosophy/no-ip-ethos.html)
