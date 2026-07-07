@@ -94,9 +94,10 @@ thiliapr/hentaiverse_script 是自由软件(Free as in Freedom)，遵循 [Affero
 ## 私货
 - plz，看看这些文章
   - [Tivoization（硬件自锁技术）](https://www.gnu.org/philosophy/tivoization.html)
-    - 臭名昭著的 [Android](https://zh.wikipedia.org/wiki/Android) 的 BootLoader 锁就是一个典型案例 
+    - 臭名昭著的 [Android](https://zh.wikipedia.org/wiki/Android) 的 BootLoader 锁就是一个典型案例: 它阻止刷入任何非官方的系统镜像
   - [Android 和用户的自由](https://www.gnu.org/philosophy/android-and-users-freedom.html)
   - [Linux、GNU和自由](https://www.gnu.org/philosophy/linux-gnu-freedom.html)
+  - [为什么开源错失了自由软件的重点](https://www.gnu.org/philosophy/open-source-misses-the-point.html)
   - [让软件免受专利困扰](https://www.gnu.org/philosophy/limit-patent-effect.html)
   - [对版权的误解—一系列的错误](https://www.gnu.org/philosophy/misinterpreting-copyright.html)
   - [重新审视版权制度：公众利益应居首位](https://www.gnu.org/philosophy/reevaluating-copyright.html)
