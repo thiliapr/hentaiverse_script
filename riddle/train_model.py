@@ -24,7 +24,25 @@ import pathlib
 from ultralytics import YOLO
 
 
+DATASET_CONFIG = """
+path: ./dataset
+train: images/train
+val: images/val
+
+nc: [{num_classes}]
+names: [{names}]
+channels: 1
+""".strip()
+
+
 def main(args: argparse.Namespace):
+    # 根据标签文件写配置
+    labels = pathlib.Path("dataset/labels.txt").read_text().strip().splitlines()
+    pathlib.Path("dataset/dataset.yaml").write_text(DATASET_CONFIG.format(
+        num_classes=len(labels),
+        names=", ".join(f"'{label}'" for label in labels)
+    ))
+
     # 创建模型
     model = YOLO()
 
