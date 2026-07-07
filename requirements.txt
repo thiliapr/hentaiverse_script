@@ -4,6 +4,5 @@ lxml
 pydantic
 tqdm
 pillow
-numpy
 ultralytics
-opencv-python
+kornia

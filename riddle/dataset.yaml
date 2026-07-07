@@ -1,7 +1,0 @@
-path: ./dataset
-train: shirakami/fubuki/ga/suki/desu
-val: images/val
-
-nc: 6  # number of classes（6只小马）
-names: ['Twilight Sparkle', 'Rarity', 'Fluttershy', 'Rainbow Dash', 'Pinkie Pie', 'Applejack']
-channels: 1
