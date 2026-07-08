@@ -32,9 +32,9 @@ from ultralytics import YOLO
 DATASET_CONFIG = """
 path: ./dataset
 train: images/train
-val: images/val
+val: images/valid
 
-nc: [{num_classes}]
+nc: {num_classes}
 names: [{names}]
 channels: 1
 """.strip()
