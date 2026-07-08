@@ -16,7 +16,7 @@ from typing import Any, Literal
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from riddle.inference import InferenceToolkit
-from utils.battle import BattleAPI, BattleResult, Effect, Item, Magic, Monster, TokenNotFoundError, AuthenticationConfig
+from utils.battle import BattleAPI, BattleResult, BaseEffect, Item, Magic, Monster, TokenNotFoundError, AuthenticationConfig
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 
@@ -142,7 +142,7 @@ class BattleBot:
             self.draught_buff = True
 
     @staticmethod
-    def __has_effect(effect_name: str, effects: list[Effect]) -> bool:
+    def __has_effect(effect_name: str, effects: list[BaseEffect]) -> bool:
         return any(effect.name == effect_name for effect in effects)
 
     def __get_alive_monsters(self) -> list[tuple[int, Monster]]:
@@ -405,15 +405,18 @@ class BattleBot:
 
     @staticmethod
     def display_situation_after_action(api: BattleAPI, textlog: list[str]):
-        def format_effects_str(effects: list[Effect]) -> str:
-            effect_strings = []
-            for effect in effects:
-                effect_str = f"{effect.name}({effect.remaining_turns} Turn"
-                if effect.remaining_turns > 1:
-                    effect_str += "s"
-                effect_str += ")"
-                effect_strings.append(effect_str)
-            return ", ".join(effect_strings)
+        def format_noun(noun: str, n: int) -> str:
+            return f"{n} {noun}" + ("s" if n > 1 else "")
+
+        def format_effects(effects: list[BaseEffect]) -> str:
+            return ", ".join(
+                (
+                    effect.name
+                    if effect.is_permanent
+                    else f"{effect.name} ({format_noun('Turn', effect.remaining_turns)})"
+                )
+                for effect in effects
+            )
 
         # 只在有日志的时候打印战斗记录
         if not textlog:
@@ -427,8 +430,8 @@ class BattleBot:
 
         # 打印现场情况
         print("+ - " * 10)
-        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects_str(api.get_player_effects())}")
-        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects_str(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
+        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
+        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
         print("# = " * 16)
 
     def execute_action(self, action: BaseAction) -> list[str]:

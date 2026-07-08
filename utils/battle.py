@@ -35,10 +35,19 @@ class Item(BaseModel):
     skill_id: str | None = Field(description="技能 ID，不可用时没有")
 
 
-class Effect(BaseModel):
+class BaseEffect(BaseModel):
     name: str = Field(description="显示名称")
     description: str = Field(description="详细描述")
+    is_permanent: bool = Field(description="是否是永久性效果")
+
+
+class TemporaryEffect(BaseEffect):
+    is_permanent: Literal[False] = Field(False, description="是否是永久性效果")
     remaining_turns: int = Field(ge=0, description="将在多少个回合后消失")
+
+
+class PermanentEffect(BaseEffect):
+    is_permanent: Literal[True] = Field(True, description="是否是永久性效果")
 
 
 class Monster(BaseModel):
@@ -48,7 +57,7 @@ class Monster(BaseModel):
     health: int = Field(ge=0, description="当前的血量")
     mana: int = Field(0, ge=0, description="当前的蓝量")
     spirit: int = Field(0, ge=0, description="当前的 Spirit 量")
-    effects: list[Effect] = Field([], description="怪兽身上的各种 Buff")
+    effects: list[BaseEffect] = Field([], description="怪兽身上的各种 Buff")
 
 
 class BattleResult(enum.Enum):
@@ -216,15 +225,13 @@ class BattleAPI:
         return battle_token, containers, logs
 
     @staticmethod
-    def __parse_effect(effect_str: str) -> Effect:
+    def __parse_effect(effect_str: str) -> BaseEffect:
         name, description, remaining_turns = re.search(r"battle\.set_infopane_effect\('([^']+)',\s*'([^']+)',\s*([^)]+)\)", effect_str).groups()
         # 有些 Effect 是永久性的（触发效果才消失），比如 battle.set_infopane_effect('Absorbing Ward', 'The next magical attack against the target has a chance to be absorbed and partially converted to MP.', 'permanent')
         try:
-            int(remaining_turns)
+            return TemporaryEffect(name=name, description=description, remaining_turns=remaining_turns)
         except ValueError:
-            remaining_turns = 19890604
-        # 返回封装对象
-        return Effect(name=name, description=description, remaining_turns=remaining_turns)
+            return PermanentEffect(name=name, description=description)
 
     @staticmethod
     def parse_damage(logs: list[str]) -> list[tuple[str, int, Literal["action", "effect"]]]:
@@ -280,7 +287,7 @@ class BattleAPI:
     def get_player_spirit(self) -> int:
         return self.__get_player_vital(["vrs"])
 
-    def get_player_effects(self) -> list[Effect]:
+    def get_player_effects(self) -> list[BaseEffect]:
         return [BattleAPI.__parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__containers["pane_effects"].find_all("img")]
 
     def get_player_magics(self) -> list[Magic]:
