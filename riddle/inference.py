@@ -30,6 +30,15 @@ def parse_args(args: list[str] | None = None):
 
 
 def main(args: argparse.Namespace):
+    # 显示版权声明、无担保说明、许可证信息和查看方式
+    print("[Info] riddle.inference - 谜题推理脚本")
+    print("[Info] Copyright (C) 2026 thiliapr <thiliapr@tutanota.com>")
+    print("[Info] 本脚本是 thiliapr/hentaiverse 的一部分，是一个自由软件，遵循 GNU AGPL v3 or later 进行分发")
+    print("[Info] thiliapr/hentaiverse_script 不提供任何保障，甚至连可销售和符合某个特定的目的都不保证")
+    print("[Info] 您应该已收到一份 AGPL 副本。如果没有，请访问 https://www.gnu.org/licenses/agpl.html")
+    print()
+
+    # 开始推理
     tool = InferenceToolkit(args.model)
     files = [args.filepath]
     if args.filepath.is_dir():

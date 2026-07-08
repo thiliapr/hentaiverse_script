@@ -664,8 +664,19 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace):
+    # 显示版权声明、无担保说明、许可证信息和查看方式
+    print("[battle_bot.main] [Info] battle_bot - HentaiVerse 自动战斗脚本")
+    print("[battle_bot.main] [Info] Copyright (C) 2026 thiliapr <thiliapr@tutanota.com>")
+    print("[battle_bot.main] [Info] 本脚本是 thiliapr/hentaiverse 的一部分，是一个自由软件，遵循 GNU AGPL v3 or later 进行分发")
+    print("[battle_bot.main] [Info] thiliapr/hentaiverse_script 不提供任何保障，甚至连可销售和符合某个特定的目的都不保证")
+    print("[battle_bot.main] [Info] 您应该已收到一份 AGPL 副本。如果没有，请访问 https://www.gnu.org/licenses/agpl.html")
+    print()
+
+    # 加载配置
     config_path = pathlib.Path(f"world/{'isekai' if args.isekai else 'persistent'}/config.json")
     config = json.loads(config_path.read_text("utf-8"))
+
+    # 获取单场战斗函数 battle_func
     battle_func = BattleWithRiddleAI(
         args.isekai,
         RiddleAIConfig.model_validate(config["riddle_ai"]),
@@ -673,6 +684,7 @@ def main(args: argparse.Namespace):
     ).battle
     battle_func = partial(battle_func, args.isekai, args.epsilon, args.difficult_level)
 
+    # 进入战斗循环
     if args.loop:
         try:
             while True:
