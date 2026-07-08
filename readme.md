@@ -79,8 +79,12 @@ thiliapr/hentaiverse_script 是自由软件(Free as in Freedom)，遵循 [Affero
        }
    }
    ```
-2. 填写`world/isekai/config.json`填写类似配置，但是不用写`task_bot.battle.{regex,(.+)}.difficult_level`和`training_henjutsu`项
+2. 填写`world/isekai/config.json`填写类似配置，但是不用写`training_henjutsu`项
 3. 运行`python task_bot.py`，大功告成
+
+### 提醒
+- 如果你想要直接使用`battle_bot.py`，请在每个世界的 [Settings](https://hentaiverse.org/?s=Character&ss=se) 把 `Use Custom Font` 打开
+  - 因为本 API 不支持也懒得支持解析天书一般的 CSS 字体
 
 ### 异世界
 1. 异世界的介绍请参见 [Wiki](https://ehwiki.org/wiki/Isekai)

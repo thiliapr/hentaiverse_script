@@ -194,6 +194,35 @@ class BaseBot(ABC):
 
         return int(market_balance), items_sold
 
+    def get_settings(self) -> tuple[BeautifulSoup, dict[str, str]]:
+        # 获取并解析设置页面
+        url = f"{self.main_url}/?s=Character&ss=se"
+        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
+
+        # 获取原有设置
+        params = {}
+        for input_element in soup.find_all("input"):
+            # 无名氏是没准备加入表单的，跳过
+            if (name := input_element.attrs.get("name")) is None:
+                continue
+
+            # 单选或复选框没选的跳过
+            if input_element.attrs.get("type") in ["checkbox", "radio"]:
+                if input_element.attrs.get("checked") is None:
+                    continue
+                # 单选框可能没有 value 属性，默认值为 "on"
+                params[name] = "on"
+
+            # 如果有 value 属性就加入表单
+            if (value := input_element.attrs.get("value")) is not None:
+                params[name] = value
+        return soup, params
+
+    def update_settings(self, params):
+        # 更新设置
+        url = f"{self.main_url}/?s=Character&ss=se"
+        self.api_request(requests.post, url, data=params)
+
     def arena(self) -> Callable[[], Any] | None:
         stamina, arena_list = self.get_arena_list("?s=Battle&ss=ar")
         if stamina < 80:
@@ -242,20 +271,16 @@ class PersistentBot(BaseBot):
             self.api_request(requests.post, url, data={"start_train": subject_id, "cancel_train": "0"})
             return henjutsu_name
 
-    def settings(self, difficult_level: str):
-        url = f"{self.main_url}/?s=Character&ss=se"
-        soup = BeautifulSoup(self.api_request(requests.get, url).text, "lxml")
+    def settings_for_task(self, difficult_level: str):
+        # 获取设置页面和原有设置
+        soup, params = self.get_settings()
 
-        # 获取字体信息
-        use_local_font = "checked" in soup.find("input", attrs={"name": "fontlocal"}).attrs
-        font_family = soup.find("input", {"name": "fontface"}).attrs["value"]
-
-        # 选择最佳称号（最后一个效果最好）和最佳 UI（Utilitarian）
+        # 选择最佳称号（最后一个效果最好）和最佳 UI (Utilitarian)
         title_override = soup.find(id="settings_title").find_all("tr")[-1].find("input", {"name": "title_override"}).attrs["value"]
         vitalstyle = "d"
 
         # 更改设置
-        self.api_request(requests.post, url, data={"difflevel": difficult_level, "title_override": title_override, "fontlocal": "on" if use_local_font else "off", "fontface": font_family, "vitalstyle": vitalstyle, "submit": "Apply Changes"})
+        self.update_settings(params | {"difflevel": difficult_level, "title_override": title_override, "vitalstyle": vitalstyle})
 
     def monster_lab_bot(self) -> tuple[bool, int]:
         url = f"{self.main_url}/?s=Bazaar&ss=ml"
@@ -331,7 +356,7 @@ class PersistentBot(BaseBot):
 
         # 打印当前战斗事件，并设置难度
         print(f"[task_bot.PersistentBot.task] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {battle_config['difficult_level']} ...")
-        self.settings(battle_config['difficult_level'])
+        self.settings_for_task(battle_config['difficult_level'])
         print(f"[task_bot.PersistentBot.task] [{event_type}] [Battle] 开始战斗 ...")
         battle_func()
 
@@ -365,9 +390,21 @@ class IsekaiBot(BaseBot):
         self.init(True, config, *args, **kwargs)
 
     # 自动化任务
+    def settings_for_task(self, difficult_level: str):
+        # 获取设置页面和原有设置
+        _, params = self.get_settings()
+
+        # 选择最佳 UI (Utilitarian)
+        vitalstyle = "d"
+
+        # 更改设置
+        self.update_settings(params | {"difflevel": difficult_level, "vitalstyle": vitalstyle})
+
     def task(self) -> tuple[str, BattleResult] | None:
         print("[task_bot.IsekaiBot.task] [LookForBattle] 检测战斗事件 ...")
         for event_type, func in [("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
+            if self.config["task_bot"]["battle"][event_type]["difficult_level"] == "0":
+                continue
             if battle_func := func():
                 battle_config = self.config["task_bot"]["battle"][event_type]
                 break
@@ -405,6 +442,14 @@ class IsekaiBot(BaseBot):
 def main():
     persistent_bot = PersistentBot()
     isekai_bot = IsekaiBot()
+
+    # 调整字体
+    print("[task_bot.main] [SetFont] 调整字体 ...")
+    for world, bot in [("Persistent", persistent_bot), ("Isekai", isekai_bot)]:
+        if not bot.enabled:
+            continue
+        _, params = bot.get_settings()
+        bot.update_settings(params | {"fontlocal": "on"})
 
     while True:
         for world, bot in [("Persistent", persistent_bot), ("Isekai", isekai_bot)]:
