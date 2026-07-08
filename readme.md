@@ -85,6 +85,12 @@ thiliapr/hentaiverse_script 是自由软件(Free as in Freedom)，遵循 [Affero
 ### 提醒
 - 如果你想要直接使用`battle_bot.py`，请在每个世界的 [Settings](https://hentaiverse.org/?s=Character&ss=se) 把 `Use Custom Font` 打开
   - 因为本 API 不支持也懒得支持解析天书一般的 CSS 字体
+- 如果你不理解配置文件的内容，请参阅
+  - 配置文件的`authentication`对应: `utils/battle.py`的`AuthenticationConfig`
+  - 配置文件的`battle_bot`对应: `battle_bot.py`的`BattleBotConfig`
+  - 配置文件的`riddle_ai`对应: `battle_bot.py`的`RiddleAIConfig`
+    - > 这是用来自动解决小马迷题的，然而效果不佳，所以请忽略它吧
+  - 配置文件的`task_bot`对应: `task_bot.py`的`MarketBotConfig`、`EquipmentStoreBotConfig`、`BattleConfig`、`BaseTaskBotConfig`
 
 ### 异世界
 1. 异世界的介绍请参见 [Wiki](https://ehwiki.org/wiki/Isekai)

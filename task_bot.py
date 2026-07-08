@@ -10,12 +10,46 @@ from typing import Any
 from collections.abc import Callable
 from tqdm import tqdm
 from bs4 import BeautifulSoup
+from pydantic import BaseModel, Field
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 from utils.battle import BattleResult, TokenNotFoundError
 from battle_bot import BattleWithRiddleAI, RiddleAIConfig, AuthenticationConfig
 
 
+# Bot 配置
+class MarketBotConfig(BaseModel):
+    wanted_items: list[str] = Field(..., description="想要保留的物品名称")
+    skipped_filters: list[str] = Field(..., description="想要跳过的过滤器（分类）")
+
+
+class EquipmentStoreBotConfig(BaseModel):
+    skipped_filters: list[str] = Field(..., description="想要跳过的过滤器（分类）")
+    skipped_qualities: list[str] = Field(..., description="想要跳过的装备品质")
+
+
+class BattleConfig(BaseModel):
+    difficult_level: str = Field(..., description="战斗难度等级，如果为 0 则不进行战斗")
+    epsilon: float = Field(..., description="攻击动作的探索率")
+    battle_bot_override: dict[str, Any] = Field(..., description="该类事件的特定的 BattleBot 配置，覆盖默认配置")
+
+
+class BaseTaskBotConfig(BaseModel):
+    enabled: bool = Field(..., description="是否启用该 Bot")
+    market_bot: MarketBotConfig = Field(..., description="市场变卖物品的配置")
+    equipment_store_bot: EquipmentStoreBotConfig = Field(..., description="装备商店的配置")
+    battle: dict[str, BattleConfig] = Field(..., description="各类战斗事件的配置")
+
+
+class PersistentBotConfig(BaseTaskBotConfig):
+    training_henjutsu: list[str] = Field(..., description="要训练的 Henjutsu 名称")
+
+
+class IsekaiBotConfig(BaseTaskBotConfig):
+    pass
+
+
+# 各个世界的 Bot
 class BaseBot(ABC):
     def init(self, isekai: bool, config: dict[str, Any], force: bool = False):
         self.enabled = config["task_bot"]["enabled"]
@@ -23,7 +57,7 @@ class BaseBot(ABC):
             return
 
         self.main_url = f"{MAIN_URL}/{'isekai' if isekai else ''}"
-        self.config = config
+        self.config = (IsekaiBotConfig if isekai else PersistentBotConfig).model_validate(config["task_bot"])
         self.battle_with_riddle_ai = BattleWithRiddleAI(
             isekai,
             RiddleAIConfig.model_validate(config["riddle_ai"]),
@@ -90,7 +124,11 @@ class BaseBot(ABC):
         soup = BeautifulSoup(self.api_request(requests.get, f"{self.main_url}/?s=Bazaar&ss=am&screen=sell").text, "lxml")
         
         # 卖掉各个过滤器下的物品
-        filters = [filter_element.attrs["href"] for filter_element in soup.find(id="filterbar").find_all("a", href=True)]
+        filters = [
+            filter_element.attrs["href"]
+            for filter_element in soup.find(id="filterbar").find_all("a", href=True)
+            if filter_element.text not in self.config.equipment_store_bot.skipped_filters
+        ]
         equipments_sold = 0
         for href in tqdm(filters, desc="Sell Equipments"):
             soup = BeautifulSoup(self.api_request(requests.get, href).text, "lxml")
@@ -98,7 +136,7 @@ class BaseBot(ABC):
             # 遍历每一个物品
             equipments = []
             for equipment in soup.find(id="equiplist").find_all("tr", onclick=True):
-                if any(quality in equipment.text for quality in self.config["task_bot"].get("equipment_store_bot", {}).get("skipped_qualities", [])):
+                if any(quality in equipment.text for quality in self.config.equipment_store_bot.skipped_qualities):
                     continue
                 if equipment.attrs.get("data-eqprotect") == "1":
                     continue
@@ -142,17 +180,15 @@ class BaseBot(ABC):
         return total_attributes_allocated
 
     def market_bot(self) -> tuple[int, list[str]]:
-        # 获取跳过的过滤器和物品
-        skipped_filters = wanted_items = []
-        if "task_bot" in self.config:
-            skipped_filters = self.config["task_bot"]["market_bot"]["skipped_filters"]
-            wanted_items = self.config["task_bot"]["market_bot"]["wanted_items"]
-
         # 获取市场主页
         soup = BeautifulSoup(self.api_request(requests.get, f"{self.main_url}/?s=Bazaar&ss=mk").text, "lxml")
 
         # 查看各个过滤器下的物品
-        filters = [(filter_element.text, filter_element.attrs["href"]) for filter_element in soup.find(id="filterbar").find_all("a", href=True) if filter_element.text not in skipped_filters]
+        filters = [
+            (filter_element.text, filter_element.attrs["href"])
+            for filter_element in soup.find(id="filterbar").find_all("a", href=True)
+            if filter_element.text not in self.config.market_bot.skipped_filters
+        ]
         items_to_sell = []
         for filter_name, href in tqdm(filters, desc="Fetch Market's Itemlist"):
             soup = BeautifulSoup(self.api_request(requests.get, href).text, "lxml")
@@ -160,7 +196,7 @@ class BaseBot(ABC):
             # 遍历每一个物品
             for item_element in soup.find(id="market_itemlist").find_all("tr", onclick=True):
                 item_name, your_stock = [ele.text for ele in item_element.find_all("td")[:2]]
-                if item_name in wanted_items:
+                if item_name in self.config.market_bot.wanted_items:
                     continue
                 if your_stock == "":
                     continue
@@ -259,7 +295,7 @@ class PersistentBot(BaseBot):
                 continue
 
             # 根据名字筛选
-            if (henjutsu_name := info_elements[0].text) not in self.config["task_bot"]["training_henjutsu"]:
+            if (henjutsu_name := info_elements[0].text) not in self.config.training_henjutsu:
                 continue
 
             # 如果无法训练（比如还在训练，或者 Credits 不够），看看下一个的情况
@@ -332,14 +368,14 @@ class PersistentBot(BaseBot):
         return battle_func
 
     def task(self) -> tuple[str, tuple[str, BattleResult]] | None:
-        if self.config["task_bot"]["training_henjutsu"]:
+        if self.config.training_henjutsu:
             print(f"[task_bot.PersistentBot.task] [TrainHenjutsu] 尝试训练 Henjutsu ...")
             if henjutsu_trained := self.train_henjutsu():
                 print(f"[task_bot.PersistentBot.task] [TrainHenjutsu] 成功开始训练 {henjutsu_trained}")
 
         print("[task_bot.PersistentBot.task] [LookForBattle] 检测战斗事件 ...")
         for event_type, func in [("Random Encounter", self.encounter), ("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
-            if (battle_config := self.config["task_bot"]["battle"][event_type])["difficult_level"] == "0":
+            if (battle_config := self.config.battle[event_type]).difficult_level == "0":
                 continue
             if battle_func := func():
                 break
@@ -355,14 +391,14 @@ class PersistentBot(BaseBot):
             print(f"[task_bot.PersistentBot.task] [{event_type}] [AllocateAttribute] 已加 {attr_allocated} 个属性点")
 
         # 打印当前战斗事件，并设置难度
-        print(f"[task_bot.PersistentBot.task] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {battle_config['difficult_level']} ...")
-        self.settings_for_task(battle_config['difficult_level'])
+        print(f"[task_bot.PersistentBot.task] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {battle_config.difficult_level} ...")
+        self.settings_for_task(battle_config.difficult_level)
         print(f"[task_bot.PersistentBot.task] [{event_type}] [Battle] 开始战斗 ...")
         battle_func()
 
         try:
             while True:
-                battle_result = self.battle_with_riddle_ai.battle(False, battle_config["epsilon"], battle_config["difficult_level"], battle_config["battle_bot_override"])
+                battle_result = self.battle_with_riddle_ai.battle(False, battle_config.epsilon, battle_config.difficult_level, battle_config.battle_bot_override)
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
@@ -403,10 +439,10 @@ class IsekaiBot(BaseBot):
     def task(self) -> tuple[str, BattleResult] | None:
         print("[task_bot.IsekaiBot.task] [LookForBattle] 检测战斗事件 ...")
         for event_type, func in [("Arena", self.arena), ("Ring of Blood", self.ring_of_blood)]:
-            if self.config["task_bot"]["battle"][event_type]["difficult_level"] == "0":
+            if self.config.battle[event_type].difficult_level == "0":
                 continue
             if battle_func := func():
-                battle_config = self.config["task_bot"]["battle"][event_type]
+                battle_config = self.config.battle[event_type]
                 break
         else:
             return
@@ -422,7 +458,7 @@ class IsekaiBot(BaseBot):
         battle_func()
         try:
             while True:
-                battle_result = self.battle_with_riddle_ai.battle(True, battle_config["epsilon"], "default", battle_config["battle_bot_override"])
+                battle_result = self.battle_with_riddle_ai.battle(True, battle_config.epsilon, "default", battle_config.battle_bot_override)
         except TokenNotFoundError:
             # 找不到 BattleToken，可能意味着遇到小马谜题，或者战斗结束。由于小马谜题在 battle 内已经解决，所以现在只可能是战斗结束
             pass
