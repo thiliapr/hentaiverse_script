@@ -114,43 +114,43 @@ class BattleAPI:
         action |= {"type": "battle", "method": "action", "token": self.__battle_token}
 
         # 告诉服务器执行动作
-        textlog = []
         while True:
             # 发送动作包给服务器
-            resp_json = None
             try:
                 resp_json = requests.post(f"{self.__main_url}/json", json=action, timeout=30, **self.__request_kwargs).json()
-            except (requests.exceptions.ChunkedEncodingError, requests.ConnectionError, requests.ReadTimeout) as e:
-                print(f"[BattleAPI.__do_action] 发生了网络错误: {e}")
-
-            # 如果响应（没有发生网络错误），就用响应更新容器和战斗记录
-            if resp_json:
                 for container_id in self.__containers:
                     if container_id in resp_json:
                         self.__containers[container_id] = BeautifulSoup(resp_json[container_id], "lxml")
                 textlog = [log["t"] for log in resp_json["textlog"]]
+                break
+            except (requests.exceptions.ChunkedEncodingError, requests.ConnectionError, requests.ReadTimeout) as e:
+                print(f"[BattleAPI.__do_action] 发生了网络错误: {e}")
 
             # 否则刷新页面，检测是否发送请求成功
-            else:
-                try:
-                    self.__battle_token, self.__containers, textlog = self.__refresh_page_and_parse()
+            try:
+                self.__battle_token, self.__containers, textlog = self.__refresh_page_and_parse()
 
-                    # 如果战斗记录没有更新，说明请求没发出去，再发一次
-                    if self.logs[-1] == textlog:
-                        print(f"[BattleAPI.__do_action] 请求没有发送到服务器，再发一次 ...")
-                        continue
+                # 如果战斗记录没有更新，说明请求没发出去，再发一次
+                if self.logs[-1] == textlog:
+                    print(f"[BattleAPI.__do_action] 请求没有发送到服务器，再发一次 ...")
+                    continue
 
-                    # 如果战斗记录包含 "Initializing" ，并且与本局的记录不同，说明这是一个新的、不同于之前的战斗。原因是服务器的确已经收到了请求，并且这个动作将所有剩余的怪兽都杀死了，结束了战斗，但是客户端接收这个消息时发生了网络错误
-                    if textlog and "Initializing" in textlog[0] and self.logs[0] != textlog:
-                        print("[BattleAPI.__do_action] 服务器已经开启新的战斗")
-                        self.battle_result = BattleResult.VICTORY
-                except TokenNotFoundError:
-                    # 如果没有找到 Token，说明本场战斗已经结束，但是由于未接收到服务器的响应，无法得知战斗结果
-                    self.battle_result = BattleResult.UNCONFIRMED
+                # 如果战斗记录包含 "Initializing" ，并且与本局的记录不同，说明这是一个新的、不同于之前的战斗。原因是服务器的确已经收到了请求，并且这个动作将所有剩余的怪兽都杀死了，结束了战斗，但是客户端接收这个消息时发生了网络错误
+                if textlog and "Initializing" in textlog[0] and self.logs[0] != textlog:
+                    print("[BattleAPI.__do_action] 服务器已经开启新的战斗")
+                    self.battle_result = BattleResult.VICTORY
+                    textlog = []
+            except TokenNotFoundError:
+                # 如果没有找到 Token，说明本场战斗已经结束，但是由于未接收到服务器的响应，无法得知战斗结果
+                self.battle_result = BattleResult.UNCONFIRMED
+                textlog = []
+
+            # 如果完美躲避上面的检查，说明请求已经发出去，但没有结束战斗，战斗仍在进行中
+            # 由于服务器不保存日志，只显示最后一次动作的日志，所以此时的 textlog 就是该次动作的日志
             break
 
         # 仅在还处于本场战斗时更新
-        if textlog:
+        if self.battle_result == BattleResult.IN_PROGRESS:
             # 添加新的战斗记录
             self.logs.append(textlog)
 
