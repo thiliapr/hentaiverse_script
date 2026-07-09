@@ -158,7 +158,6 @@ class BattleAPI:
                 textlog = []
 
             # 如果完美躲避上面的检查，说明请求已经发出去，但没有结束战斗，战斗仍在进行中
-            # 由于服务器不保存日志，只显示最后一次动作的日志，所以此时的 textlog 就是该次动作的日志
             break
 
         # 仅在还处于本场战斗时更新
@@ -232,6 +231,7 @@ class BattleAPI:
         containers = {container_id: soup.find(id=container_id) for container_id in self.__containers}
 
         # 获取最新战斗记录。网页里为了方便查看最新信息，记录是从新到旧排序的，也就是新的在上边、旧的在下边。我们得反转回来
+        # 服务器不保存完整战斗记录，只显示最后一次动作的记录，所以从网页获取的的 textlog 就是最后一次动作的产生的日志
         logs = [x.text for x in reversed(soup.find(id="textlog").find_all("tr"))]
         return battle_token, containers, logs
 
