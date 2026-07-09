@@ -89,7 +89,7 @@ thiliapr/hentaiverse_script 是自由软件(Free as in Freedom)，遵循 [Affero
   - 配置文件的`authentication`对应: `utils/battle.py`的`AuthenticationConfig`
   - 配置文件的`battle_bot`对应: `battle_bot.py`的`BattleBotConfig`
   - 配置文件的`riddle_ai`对应: `battle_bot.py`的`RiddleAIConfig`
-    - > 这是用来自动解决小马迷题的，然而效果不佳，所以请忽略它吧
+    - 这是用来自动解决小马迷题的，然而效果不佳，所以请忽略它吧
   - 配置文件的`task_bot`对应: `task_bot.py`的`MarketBotConfig`、`EquipmentStoreBotConfig`、`BattleConfig`、`BaseTaskBotConfig`
 
 ### 异世界
