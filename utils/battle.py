@@ -137,9 +137,9 @@ class BattleAPI:
             # 否则刷新页面，检测是否发送请求成功
             try:
                 # 这里直接赋值给 self.__battle_token 和 self.__containers 可能会把另一场战斗的情况赋值，因为我们现在未能确保获取到的页面仍处于本场战斗内
-                # 但问题不大，self.__battle_token 和 self.__containers 都是私有变量，API 调用者不会使用
+                # 但问题不大，self.__battle_token 和 self.__containers 都是私有变量，API 调用者不应该尝试拿到这些数据
                 # 在后面检测战斗结果后，API 调用者如果发现 battle_result 不为 IN_PROGRESS，就不应该继续调用本 API 方法执行操作，进而不会使用到 self.__battle_token 和 self.__containers
-                # 而且我们已经在后面各个检测中，确保不会将另一场战斗的 textlog 加入 self.logs，所以 self.logs 是干净的，API 调用者在战斗结束后应该读取 self.logs 而不是其他东西
+                # 而且我们已经在后面各个检测中，确保不会将另一场战斗的 textlog 加入 self.logs，所以 self.logs 是干净的，API 调用者在战斗结束后应该读取的是 self.logs 而不是其他东西
                 self.__battle_token, self.__containers, textlog = self.__refresh_page_and_parse()
 
                 # 如果战斗记录没有更新，说明请求没发出去，再发一次
