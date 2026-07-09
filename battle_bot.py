@@ -5,7 +5,7 @@
 
 # 本文件是 thiliapr/hentaiverse_script 的一部分
 # thiliapr/hentaiverse_script 是自由软件，你可以依照由自由软件基金会发布的 GNU Affero 通用公共许可证分发或修改它，无论是版本 3 许可证，还是（按你的决定）任何以后版都可以。
-# 发布 thiliapr/hentaiverse_script 是希望它能有用，但是并无保障，甚至连可销售和符合某个特定的目的都不保证。请参看 GNU 通用公共许可证以了解详情。
+# 发布 thiliapr/hentaiverse_script 是希望它能有用，但是并无保障，甚至连可销售和符合某个特定的目的都不保证。请参看 GNU Affero 通用公共许可证以了解详情。
 # 你应该随程序获得一份 GNU Affero 通用公共许可证的复本。如果没有，请看 <https://www.gnu.org/licenses/agpl.html>。
 
 from PIL import Image
@@ -421,10 +421,10 @@ class BattleBot:
         # 提供战斗记录时打印
         if textlog:
             print("\n".join(textlog))
-            print("+ - " * 10)
 
         # 如果游戏继续，就打印现场情况，否则用分隔符表示游戏结束
         if api.battle_result == BattleResult.IN_PROGRESS:
+            print("+ - " * 10)
             print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
             print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
             print("# = " * 16)
