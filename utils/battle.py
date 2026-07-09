@@ -93,7 +93,7 @@ class BattleAPI:
         if isekai:
             self.__main_url += "/isekai"
 
-        # 根据页面更新 soup 和战斗记录
+        # 根据页面初始化 soup 和战斗记录
         self.__containers = {container_id: None for container_id in ["pane_vitals", "pane_effects", "pane_monster", "pane_item", "table_magic"]}
         self.__battle_token, self.__containers, initial_logs = self.__refresh_page_and_parse()
         self.logs = [initial_logs]
@@ -115,7 +115,7 @@ class BattleAPI:
 
         # 告诉服务器执行动作
         while True:
-            # 发送动作包给服务器
+            # 发送动作包给服务器，如果成功就更新容器和日志
             try:
                 resp_json = requests.post(f"{self.__main_url}/json", json=action, timeout=30, **self.__request_kwargs).json()
                 for container_id in self.__containers:
@@ -128,6 +128,10 @@ class BattleAPI:
 
             # 否则刷新页面，检测是否发送请求成功
             try:
+                # 这里直接赋值给 self.__battle_token 和 self.__containers 可能会把另一场战斗的情况赋值，因为我们现在未能确保获取到的页面仍处于本场战斗内
+                # 但问题不大，self.__battle_token 和 self.__containers 都是私有变量，API 调用者不会使用
+                # 在后面检测战斗结果后，API 调用者如果发现 battle_result 不为 IN_PROGRESS，就不应该继续调用本 API 方法执行操作，进而不会使用到 self.__battle_token 和 self.__containers
+                # 而且我们已经在后面各个检测中，确保不会将另一场战斗的 textlog 加入 self.logs，所以 self.logs 是干净的，API 调用者在战斗结束后应该读取 self.logs 而不是其他东西
                 self.__battle_token, self.__containers, textlog = self.__refresh_page_and_parse()
 
                 # 如果战斗记录没有更新，说明请求没发出去，再发一次

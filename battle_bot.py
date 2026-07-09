@@ -418,21 +418,18 @@ class BattleBot:
                 for effect in effects
             )
 
-        # 只在有日志的时候打印战斗记录
+        # 提供战斗记录时打印
         if not textlog:
-            return
-        print("\n".join(textlog))
+            print("\n".join(textlog))
 
-        # 如果游戏尚未结束，打印玩家和场上怪兽信息
-        if all(monster.health == 0 for monster in api.monsters):
+        # 如果游戏继续，就打印现场情况，否则用分隔符表示游戏结束
+        if api.battle_result == BattleResult.IN_PROGRESS:
+            print("+ - " * 10)
+            print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
+            print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
+            print("# = " * 16)
+        else:
             print("- - " * 20)
-            return
-
-        # 打印现场情况
-        print("+ - " * 10)
-        print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
-        print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
-        print("# = " * 16)
 
     def execute_action(self, action: BaseAction) -> list[str]:
         # 执行动作，获得战斗记录
