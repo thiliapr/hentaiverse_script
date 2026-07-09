@@ -29,10 +29,18 @@ class Magic(BaseModel):
     category: str = Field(description="所属分类")
 
 
-class Item(BaseModel):
+class BaseItem(BaseModel):
     name: str = Field(description="显示名称")
     available: bool = Field(description="目前是否可用")
-    skill_id: str | None = Field(description="技能 ID，不可用时没有")
+
+
+class AvailableItem(BaseItem):
+    available: Literal[True] = Field(True, description="目前是否可用")
+    skill_id: str = Field(description="技能 ID")
+
+
+class UnavailableItem(BaseItem):
+    available: Literal[False] = Field(False, description="目前是否可用")
 
 
 class BaseEffect(BaseModel):
@@ -186,8 +194,9 @@ class BattleAPI:
         # 解析怪兽受到的伤害，并相应地更新怪兽的生命值
         # 你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.monsters)}
+
+        # 逐条查看本次动作的战斗记录，如果发现伤害承受者是在场怪兽，就更新相应怪兽的血量
         for monster_name, damage, _ in BattleAPI.parse_damage(textlog):
-            # 更新怪兽生命值
             if monster_name in monster_name_to_idx:
                 monster = self.monsters[monster_name_to_idx[monster_name]]
                 monster.health = int(max(monster.health - damage, 0))
@@ -196,12 +205,10 @@ class BattleAPI:
         # 每次获取的时候，先更新一下状态
         for monster, monster_element in zip(self.monsters, self.__containers["pane_monster"].find_all(class_="btm1")):
             # 注意: 血量、蓝量、Spirit 量条显示的都是比例缩放的值，比如满了就是 120px，一半就是 60px，非常不靠谱
-            for attr, alt in [("mana", "magic"), ("spirit", "spirit")]:
-                result = monster_element.find(alt=alt)
-                if result is None:
-                    continue
-                value = int(re.search(r"width:(\d+)px", result.attrs["style"]).group(1))
-                setattr(monster, attr, value)
+            for resource_type, alt in [("mana", "magic"), ("spirit", "spirit")]:
+                if (result := monster_element.find(alt=alt)) is not None:
+                    value = int(re.search(r"width:(\d+)px", result.attrs["style"]).group(1))
+                    setattr(monster, resource_type, value)
 
             # 有时候服务器返回日志说效果造成了什么伤害，但就是不说怪兽名，比如 "Freezing Limbs explodes for 253 cold damage"
             # 这样就会造成怪兽生命值偏大（我有什么办法）。等到怪兽死亡时，我们就手动置零吧
@@ -220,7 +227,7 @@ class BattleAPI:
             raise TokenNotFoundError(page)
         battle_token, = result.groups()
 
-        # 解析页面
+        # 解析页面，获取容器
         soup = BeautifulSoup(page, "lxml")
         containers = {container_id: soup.find(id=container_id) for container_id in self.__containers}
 
@@ -268,7 +275,7 @@ class BattleAPI:
     def use_magic(self, magic: Magic, target: int) -> list[str]:
         return self.__do_action({"mode": "magic", "target": target, "skill": magic.skill_id})
 
-    def use_item(self, item: Item) -> list[str]:
+    def use_item(self, item: AvailableItem) -> list[str]:
         return self.__do_action({"mode": "items", "target": 0, "skill": item.skill_id})
 
     def do_defend(self) -> list[str]:
@@ -295,32 +302,36 @@ class BattleAPI:
         return [BattleAPI.__parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__containers["pane_effects"].find_all("img")]
 
     def get_player_magics(self) -> list[Magic]:
-        current_category: str
         magic_skills = []
+        current_category: str  # 应该在后面被定义。如果没有定义导致报错，那么就应该更新 API 以适应新的游戏 UI 了
 
+        # table_magic 的其中一行，可能是提示下面魔法的分类的图像，也可能是一两个魔法
         for row in self.__containers["table_magic"].find_all("tr"):
+            # 如果遇到提示分类的图像，那么更新当前分类
             if category_img := row.find("img"):
                 current_category = category_img.attrs["alt"]
                 continue
-            # 你知道吗，每一行都有 [1, 2] 个魔法，这混乱程度……
+
+            # 如果这一行是魔法，就遍历每一个魔法，扒出其中的信息
+            # 可点击的就是可用的，反之亦然
             for magic_element in row.find_all(class_="btsd"):
                 name, description, mana_cost, cooldown = re.search(r"battle\.set_infopane_spell\('([^']+)', '([^']+)', '\w+', (\d+), \d+, (\d+)\)", magic_element.attrs["onmouseover"]).groups()
-                skill_id = magic_element.attrs["id"]
-                available = "onclick" in magic_element.attrs
-                magic_skills.append(Magic(name=name, available=available, skill_id=skill_id, description=description, mana_cost=mana_cost, cooldown=cooldown, category=current_category))
+                magic_skills.append(Magic(name=name, available="onclick" in magic_element.attrs, skill_id=magic_element.attrs["id"], description=description, mana_cost=mana_cost, cooldown=cooldown, category=current_category))
         return magic_skills
 
-    def get_player_items(self) -> list[Item]:
+    def get_player_items(self) -> list[BaseItem]:
         items = []
-        for child in self.__containers["pane_item"].find_all(class_="bti1"):
-            if (item_element := child.find(class_="bti3").find("div")) is None:
+        for item_container in self.__containers["pane_item"].find_all(class_="bti3"):
+            # 跳过没有物品的容器
+            if (item_element := item_container.find("div")) is None:
                 continue
-            name = item_element.text
-            available = "onclick" in item_element.attrs
-            skill_id = None
-            if available:
+
+            # 如果物品可以点击，那么就是可用的，否则就是不可用的
+            if "onclick" in item_element.attrs:
                 skill_id, = re.search(r"battle\.set_friendly_skill\('([^']+)'\)", item_element.attrs["onclick"]).groups()
-            items.append(Item(name=name, available=available, skill_id=skill_id))
+                items.append(AvailableItem(name=item_element.text, skill_id=skill_id))
+            else:
+                items.append(UnavailableItem(name=item_element.text))
         return items
 
     def add_post_action_hook(self, callback: Callable[["BattleAPI", list[str]], Any]):

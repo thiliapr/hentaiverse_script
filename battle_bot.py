@@ -16,7 +16,7 @@ from typing import Any, Literal
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from riddle.inference import InferenceToolkit
-from utils.battle import BattleAPI, BattleResult, BaseEffect, Item, Magic, Monster, TokenNotFoundError, AuthenticationConfig
+from utils.battle import BattleAPI, BattleResult, BaseEffect, AvailableItem, Magic, Monster, TokenNotFoundError, AuthenticationConfig
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 
@@ -60,7 +60,7 @@ class BaseAction(BaseModel, ABC):
 
 class ActionItem(BaseAction):
     action_type: Literal["item"] = Field("item")
-    item: Item
+    item: AvailableItem
 
     @property
     def skill_id(self) -> str:
@@ -419,12 +419,12 @@ class BattleBot:
             )
 
         # 提供战斗记录时打印
-        if not textlog:
+        if textlog:
             print("\n".join(textlog))
+            print("+ - " * 10)
 
         # 如果游戏继续，就打印现场情况，否则用分隔符表示游戏结束
         if api.battle_result == BattleResult.IN_PROGRESS:
-            print("+ - " * 10)
             print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
             print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
             print("# = " * 16)
