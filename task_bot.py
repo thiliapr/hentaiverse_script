@@ -527,6 +527,7 @@ def main():
             # 成功进行战斗后，记录战斗结果
             if result := bot.task():
                 log_battle_result(world, result)
+                break
         else:
             # Random Encounter event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery
             for _ in tqdm(range(random.randint(1800, 1830)), desc="Wait"):
