@@ -480,6 +480,24 @@ class IsekaiBot(BaseBot):
         return event_type, battle_result
 
 
+def log_battle_result(world: str, result: tuple[str, BattleResult]):
+    # 获取战斗事件类型和结果，定义事件 ID
+    event_type, battle_result = result
+    event_id = f"{world}:{event_type}"
+
+    # 加载日志，如果没有就初始化为空
+    task_log = {}
+    if (task_log_path := pathlib.Path(f"world/task_log.json")).exists():
+        task_log = json.loads(task_log_path.read_text("utf-8"))
+
+    # 事件对应的计数加一
+    log = task_log.setdefault("battle_result", {}).setdefault(event_id, {})
+    log[battle_result.name] = log.get(battle_result.name, 0) + 1
+
+    # 将更新后的日志写入本地
+    task_log_path.write_text(json.dumps(task_log, indent="\t"), "utf-8")
+
+
 def main():
     # 显示版权声明、无担保说明、许可证信息和查看方式
     print("[task_bot.main] [Info] task_bot - HentaiVerse 战斗、市场、训练的自动化脚本")
@@ -503,27 +521,17 @@ def main():
 
     while True:
         for world, bot in [("Persistent", persistent_bot), ("Isekai", isekai_bot)]:
-            if bot.enabled:
-                if result := bot.task():
-                    break
+            # 跳过未启用的 Bot
+            if not bot.enabled:
+                continue
+            # 成功进行战斗后，记录战斗结果
+            if result := bot.task():
+                log_battle_result(world, result)
         else:
             # Random Encounter event can occur once every 30 minutes upon visitation of the E-Hentai news page or a gallery
             for _ in tqdm(range(random.randint(1800, 1830)), desc="Wait"):
                 time.sleep(1)
             continue
-
-        # 成功进行战斗后，记录战斗结果
-        event_type, battle_result = result
-        event_id = f"{world}:{event_type}"
-
-        task_log = {}
-        if (task_log_path := pathlib.Path(f"world/task_log.json")).exists():
-            task_log = json.loads(task_log_path.read_text("utf-8"))
-
-        log = task_log.setdefault("battle_result", {}).setdefault(event_id, {})
-        log[battle_result.name] = log.get(battle_result.name, 0) + 1
-
-        task_log_path.write_text(json.dumps(task_log, indent="\t"), "utf-8")
 
 
 if __name__ == "__main__":
