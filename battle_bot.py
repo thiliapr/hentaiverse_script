@@ -8,11 +8,11 @@
 # 发布 thiliapr/hentaiverse_script 是希望它能有用，但是并无保障，甚至连可销售和符合某个特定的目的都不保证。请参看 GNU Affero 通用公共许可证以了解详情。
 # 你应该随程序获得一份 GNU Affero 通用公共许可证的复本。如果没有，请看 <https://www.gnu.org/licenses/agpl.html>。
 
-from PIL import Image
 import json, pathlib, random, re, argparse, math, winsound, time, requests
 from functools import partial
 from abc import ABC, abstractmethod
 from typing import Any, Literal
+from PIL import Image
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from riddle.inference import InferenceToolkit
@@ -151,6 +151,12 @@ class BattleBot:
     def __get_alive_monsters(self) -> list[tuple[int, Monster]]:
         return [(idx, monster) for idx, monster in enumerate(self.api.monsters) if monster.health]
 
+    def __get_active_monsters(self) -> int:
+        return sum(
+            not BattleBot.__has_effect("Asleep", monster.effects)
+            for _, monster in self.__get_alive_monsters()
+        )
+
     def __predict_damage_to_monster(self, skill_id: str, monster: Monster) -> float:
         skill_base_damage = self.game_data.skill_damage_base.get(skill_id, EmptyEWMAData).get_current_average(19890604)
         multiplier = self.game_data.skill_monster_damage_multiplier.get(f"{skill_id}@{monster.monster_id}", EmptyEWMAData).get_current_average(1)
@@ -160,20 +166,24 @@ class BattleBot:
         return self.game_data.skill_recovery_amount.get(skill_id, 19890604)
 
     def __predict_damage_to_player(self, skill_id: str) -> float:
-        active_monsters = sum(not BattleBot.__has_effect("Asleep", monster.effects) for _, monster in self.__get_alive_monsters())
         reaction_monsters_ratio = self.game_data.skill_reaction_monsters_ratio.get(skill_id, EmptyEWMAData).get_current_average(0)
         each_damage = self.game_data.monster_damage_to_player.get_current_average(0)
-        return active_monsters * reaction_monsters_ratio * each_damage
+        return self.__get_active_monsters() * reaction_monsters_ratio * each_damage
 
     def __update_attack_data(self, action: ActionMagic | ActionAttack, textlog: list[str]):
         # 分析伤害
         damage_info = []
         for monster_name, damage, source in BattleAPI.parse_damage(textlog):
+            # 跳过非玩家操作直接造成的伤害
             if source != "action":
                 continue
-            if (monster_info := next(((monster.monster_id, idx) for idx, monster in enumerate(self.api.monsters) if monster.name == monster_name), None)) is not None:
-                monster_id, monster_index = monster_info
-                damage_info.append((monster_index, monster_id, int(damage)))
+            # 获取怪兽在数据库的 ID、在战斗中的位置
+            if (monster_info := next((
+                (monster_idx, monster.monster_id)
+                for monster_idx, monster in enumerate(self.api.monsters)
+                if monster.name == monster_name
+            ), None)) is not None:
+                damage_info.append((*monster_info, damage))
         if not damage_info:
             return
 
@@ -202,14 +212,10 @@ class BattleBot:
             print("\n".join(textlog))
             print("[battle_bot.BattleBot.__update_recovery_data] [TextLogReplay] ===== End of Replay ===")
             raise RuntimeError("使用了回复魔法/物品，却找不到回复记录。这意味着存在回复记录规则的遗漏，请联系作者并把上面的记录发给作者修复（或者你自己加上去）")
-
-        health_restored = int(health_restored)
-        if health_restored:
-            self.game_data.skill_recovery_amount[action.skill_id] = max(health_restored, self.game_data.skill_recovery_amount.get(action.skill_id, 0))
+        self.game_data.skill_recovery_amount[action.skill_id] = max(int(health_restored), self.game_data.skill_recovery_amount.get(action.skill_id, 0))
 
     def __update_monster_damage(self, action: BaseAction, textlog: list[str]):
-        total_damage = 0
-        damage_count = 0
+        total_damage = damage_count = 0
         for log in textlog:
             # 获取伤害
             damage = None
@@ -227,8 +233,8 @@ class BattleBot:
                 damage_count += 1
 
         # 更新数据
-        if alive_monsters := len(self.__get_alive_monsters()):
-            self.game_data.skill_reaction_monsters_ratio.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(damage_count / alive_monsters)
+        if active_monsters := self.__get_active_monsters():
+            self.game_data.skill_reaction_monsters_ratio.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(damage_count / active_monsters)
         if damage_count:
             self.game_data.monster_damage_to_player.add_observation(total_damage / damage_count)
 
@@ -241,7 +247,6 @@ class BattleBot:
         targets_down = min(max_targets - targets_up - 1, math.ceil((max_targets - 1) / 2))
         window = list(enumerate(self.api.monsters))[monster_idx - targets_up:monster_idx + targets_down + 1]
         window = [(idx, monster) for idx, monster in window if monster.health > 0]
-        player_alive = not self.api.get_player_health() <= self.__predict_damage_to_player(skill_id)
 
         # 从历史数据预测伤害，计算指标
         raw_damage_dealt = {idx: self.__predict_damage_to_monster(skill_id, monster) for idx, monster in window}
@@ -251,7 +256,6 @@ class BattleBot:
         if survivor_healths := [x for x in [monster.health - actual_damage_taken.get(idx, 0) for idx, monster in enumerate(self.api.monsters)] if x]:
             kill_deficit = min(survivor_healths)
         damage_sum = sum(actual_damage_taken.values())
-        damage_per_mana = damage_sum / max(mana_cost, 1)
 
         # 如果 restore_before_end_flag 为真，则尽量留一个活口，下一场战斗前可以回血、蓝、Spirit
         leave_one_alive = None
@@ -259,10 +263,31 @@ class BattleBot:
             alive = len(self.__get_alive_monsters())
             leave_one_alive = alive - will_die == 1, alive - len(window) == 1
 
-        return player_alive, leave_one_alive, will_die, -kill_deficit, damage_sum, len(window), damage_per_mana, sum(raw_damage_dealt.values())
+        return (
+            # 攻击之后，玩家会死吗
+            self.api.get_player_health() > self.__predict_damage_to_player(skill_id),
+            # 有多可能只留下一个怪兽。不适用时为 None
+            leave_one_alive,
+            # 多少个怪兽会死于这场攻击
+            will_die,
+            # 攻击之后还活着的怪兽里，血量最低的是多少
+            -kill_deficit,
+            # 攻击总共造成了多少伤害
+            damage_sum,
+            # 多少个怪兽被打中
+            len(window),
+            # 平均每花费 1 点 Mana，可以造成多少伤害
+            damage_sum / max(mana_cost, 1),
+            # 不计怪兽当前血量，总共会造成多少伤害
+            sum(raw_damage_dealt.values())
+        )
 
     def __try_to_use(self, category: Literal["magic", "item"], name: str, **kwargs) -> ActionItem | ActionMagic | None:
-        if thing := next((thing for thing in getattr(self.api, f"get_player_{category}s")() if thing.name == name and thing.available), None):
+        if thing := next((
+            thing
+            for thing in getattr(self.api, f"get_player_{category}s")()
+            if thing.name == name and thing.available
+        ), None):
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
     def __heal(self, critical: bool) -> tuple[BaseAction | None, bool]:
