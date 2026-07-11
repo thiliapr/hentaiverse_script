@@ -94,6 +94,9 @@ class ActionDefend(BaseAction):
         return "Defend"
 
 
+ActionScore = tuple[int | float | bool, ...]
+
+
 class BattleBotConfig(BaseModel):
     elite_health_threshold: int = Field(gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
     critical_health_line: int = Field(gt=0, description="濒死判定线，低于此值将不计代价回血")
@@ -229,7 +232,7 @@ class BattleBot:
         if damage_count:
             self.game_data.monster_damage_to_player.add_observation(total_damage / damage_count)
 
-    def __analyze_score(self, skill_id: str, monster_idx: int, mana_cost: int) -> tuple:
+    def __analyze_score(self, skill_id: str, monster_idx: int, mana_cost: int) -> ActionScore:
         # 获取攻击窗口。以目标为中心，尽量保持对称（多出一个就给左侧），左右两侧最多各取 ceil((max_targets-1)/2) 个目标，总数量不超过 max_targets
         # 示例（max_targets=6，T 代表 Target）: [T B C D] E F G H; A [B C D T F G] H; A B C D [E F G T]
         # 你问我为什么这个窗口是这个逻辑？我咋知道，我就是个写外挂的，这个问题得问游戏开发者去
@@ -282,25 +285,30 @@ class BattleBot:
 
         return action_full_cure or action_consumable or action_cure, cure_is_worth_it
 
-    def __decrease_cooldown(self) -> ActionMagic | None:
+    def __decrease_cooldown(self) -> list[ActionMagic, ActionScore] | None:
+        def will_player_die(action: BaseAction) -> tuple[float, bool]:
+            damage_to_player = self.__predict_damage_to_player(action.skill_id)
+            return damage_to_player, damage_to_player < self.api.get_player_health()
+
         # Higher action speed decreases the amount of time units an action takes. This will often lead to being able to perform more actions per tick. This will be most visible with buff durations, as it becomes possible to attack multiple times before the duration decreases by 1. Similarly, vital regeneration, be they from spells, items, or natural regeneration, are also only received when ticks happen. A monster having a high attack speed or an action performed by the player having a long action time, may allow monsters to attack multiple times in a single player action.
-        # Action	Base Action Speed
-        # Cure, Regen	0.2?
-        # Haste, Shadow Veil, Absorb, Spark of Life, Arcane Focus, Heartseeker, Spirit Shield	0.1?
-        # Protection	0.2?
         # https://ehwiki.org/wiki/Action_Speed
         action_scores = []
         for magic in self.api.get_player_magics():
+            # 跳过不可用的魔法和不安全的魔法（攻击魔法）
             if not magic.available or magic.category not in ["magic_support", "magic_curative"]:
                 continue
 
-            action = ActionMagic(magic=magic, target=BattleAPI.PLAYER_ID)
-            if (damage_to_player := self.__predict_damage_to_player(action.skill_id)) > self.api.get_player_health():
-                continue
+            # Action 化，如果不会致人死地就加入候选列表
+            if (result := will_player_die(action := ActionMagic(magic=magic, target=BattleAPI.PLAYER_ID)))[1]:
+                action_scores.append((action, (-result[0], -action.magic.mana_cost)))
+        
+        # 如果可能的话，试着防御刷 CD
+        if (result := will_player_die(action := ActionDefend()))[1]:
+            action_scores.append((action, (-result[0], 0)))
 
-            action_scores.append((action, (-damage_to_player, -action.magic.mana_cost)))
+        # 如果存在动作可以刷 CD 又不致玩家于死地，就返回
         if action_scores:
-            return max(action_scores, key=lambda x: x[1])[0]
+            return action_scores
 
     def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
         control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
@@ -378,7 +386,7 @@ class BattleBot:
             self.__grind_proficiency_attrs.add("supportive")
             return action
 
-    def __auto_attack(self) -> list[tuple[BaseAction, tuple]]:
+    def __auto_attack(self) -> list[tuple[BaseAction, ActionScore]]:
         # 获取各个目标的普通攻击、魔法分数
         action_scores = []
         for monster_idx in range(len(self.api.monsters)):
@@ -451,7 +459,7 @@ class BattleBot:
 
         return textlog
 
-    def decide(self) -> list[tuple[BaseAction, tuple | int]]:
+    def decide(self) -> list[tuple[BaseAction, ActionScore | int]]:
         # 敌人血厚时，要有持续回血、回蓝的 Buff
         if self.draught_buff:
             for item_name, effect_name in [("Health Draught", "Regeneration"), ("Mana Draught", "Replenishment"), ("Spirit Draught", "Refreshment")]:
@@ -480,8 +488,8 @@ class BattleBot:
                 return [(action, 0)]
 
             # 如果只是 Cure 在 CD（因为 Cure 的 CD 短，等得起），那就做一些消耗 CD 又动作快（不被太多怪兽攻击）的事情
-            if cure_is_worth_it and (action := self.__decrease_cooldown()):
-                return [(action, 0)]
+            if cure_is_worth_it and (actions := self.__decrease_cooldown()):
+                return actions
         if self.api.get_player_health() < self.config.normal_healing_line:
             if action := self.__heal(critical=False)[0]:
                 return [(action, 0)]
@@ -520,6 +528,11 @@ class BattleBot:
 
 
 def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: dict[str, Any] | None = None) -> BattleResult:
+    def format_action_info(action: BaseAction, score: ActionScore) -> str:
+        if hasattr(action, "target"):
+            return f"skill={action.skill_id}; target={action.target}; score={score}"
+        return f"skill={action.skill_id}; score={score}"
+
     # 初始化档案
     root_dir = pathlib.Path("world") / ("isekai" if isekai else "persistent")
     config_path, game_data_path, monster_damage_to_player_path = [root_dir / f"{name}.json" for name in ["config", "game_data", f"monster_damage_to_player [level={difficult_level}]"]]
@@ -560,14 +573,13 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
     while api.battle_result == BattleResult.IN_PROGRESS:
         # 决定动作
         actions = battle_bot.decide()
-        action, score = best_action, best_score = max(actions, key=lambda x: x[1])
+        action_rating, (action, score) = "最佳", max(actions, key=lambda x: x[1])
 
         # 仅在多个可用动作时打印信息
         if len(actions) > 1:
-            print(f"[battle_bot.battle] 最佳动作: skill={best_action.skill_id}; target={best_action.target}; score={best_score}")
             if random.random() < epsilon:
-                action, score = random.choice(actions)
-                print(f"[battle_bot.battle] [随机探索] 随机选择动作: skill={action.skill_id}; target={action.target}; score={score}")
+                action_rating, (action, score) = "随机", random.choice(actions)
+            print(f"[battle_bot.battle] {action_rating}动作: {format_action_info(action, score)}")
 
         # 控制频率并执行动作
         # To prevent botting and overloading the server there is a server side restriction which prevents more than 4 turns per second.
