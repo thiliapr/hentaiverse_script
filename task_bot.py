@@ -312,7 +312,7 @@ class PersistentBot(BaseBot):
             self.api_request(requests.post, url, data={"start_train": subject_id, "cancel_train": "0"})
             return henjutsu_name
 
-    def settings_for_task(self, difficult_level: str):
+    def setting_for_task(self, difficult_level: str):
         # 获取设置页面和原有设置
         soup, params = self.get_settings()
 
@@ -386,19 +386,20 @@ class PersistentBot(BaseBot):
                 break
         else:
             return
+        print(f"[task_bot.PersistentBot.task] [LookForBattle] 发现战斗事件 {event_type}，指定战斗难度为 {battle_config.difficult_level}")
 
-        print(f"[task_bot.PersistentBot.task] [{event_type}] [RepairEquipment] 检测装备损坏 ...")
+        print(f"[task_bot.PersistentBot.task] [RepairEquipment] 检测装备损坏 ...")
         if self.repair_equipment():
-            print(f"[task_bot.PersistentBot.task] [{event_type}] [RepairEquipment] 已修复所有装备")
+            print(f"[task_bot.PersistentBot.task] [RepairEquipment] 已修复所有装备")
 
-        print(f"[task_bot.PersistentBot.task] [{event_type}] [AllocateAttribute] 尝试加点 ...")
+        print(f"[task_bot.PersistentBot.task] [AllocateAttribute] 尝试加点 ...")
         if attr_allocated := self.attribute_point_allocation():
-            print(f"[task_bot.PersistentBot.task] [{event_type}] [AllocateAttribute] 已加 {attr_allocated} 个属性点")
+            print(f"[task_bot.PersistentBot.task] [AllocateAttribute] 已加 {attr_allocated} 个属性点")
 
-        # 打印当前战斗事件，并设置难度
-        print(f"[task_bot.PersistentBot.task] [{event_type}] [SettingDifficultLevel] 设置难度等级为 {battle_config.difficult_level} ...")
-        self.settings_for_task(battle_config.difficult_level)
-        print(f"[task_bot.PersistentBot.task] [{event_type}] [Battle] 开始战斗 ...")
+        print(f"[task_bot.PersistentBot.task] [SettingForTask] 调整设置 ...")
+        self.setting_for_task(battle_config.difficult_level)
+
+        print(f"[task_bot.PersistentBot.task] [Battle] 开始战斗 ...")
         battle_func()
 
         try:
@@ -431,7 +432,7 @@ class IsekaiBot(BaseBot):
         self.init(True, config, *args, **kwargs)
 
     # 自动化任务
-    def settings_for_task(self, difficult_level: str):
+    def setting_for_task(self, difficult_level: str):
         # 获取设置页面和原有设置
         _, params = self.get_settings()
 
@@ -451,6 +452,7 @@ class IsekaiBot(BaseBot):
                 break
         else:
             return
+        print(f"[task_bot.IsekaiBot.task] [LookForBattle] 发现战斗事件 {event_type}，指定战斗难度为 {battle_config.difficult_level}")
 
         print(f"[task_bot.IsekaiBot.task] [RepairEquipment] 检测装备损坏 ...")
         if self.repair_equipment():
@@ -460,6 +462,10 @@ class IsekaiBot(BaseBot):
         if attr_allocated := self.attribute_point_allocation():
             print(f"[task_bot.IsekaiBot.task] [AllocateAttribute] 已加 {attr_allocated} 个属性点")
 
+        print(f"[task_bot.IsekaiBot.task] [SettingForTask] 调整设置 ...")
+        self.setting_for_task(battle_config.difficult_level)
+
+        print(f"[task_bot.IsekaiBot.task] [Battle] 开始战斗 ...")
         battle_func()
         try:
             while True:
