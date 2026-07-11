@@ -162,7 +162,7 @@ class ShadowGenerator:
         # 生成长方形阴影
         shadow = (rect_x <= self.xx) & (self.xx < rect_x + rect_width) & (rect_y <= self.yy) & (self.yy < rect_y + rect_height)
         shadow = shadow.float() * torch.where(torch.randint(high=2, size=[batch_size, MAX_RECTANGLE_SHADOWS, 1, 1], dtype=bool, device=self.device), -1, 1)
-        shadow = shadow * (SHADOW_MIN_BRIGHTNESS + SHADOW_RANDOM_BRIGHTNESS * torch.rand(batch_size, MAX_RECTANGLE_SHADOWS, 1, 1))
+        shadow = shadow * (SHADOW_MIN_BRIGHTNESS + SHADOW_RANDOM_BRIGHTNESS * torch.rand(batch_size, MAX_RECTANGLE_SHADOWS, 1, 1, device=self.device))
         
         # 合并每个批次阴影
         shadow = shadow.sum(dim=1)
