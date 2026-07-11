@@ -311,12 +311,13 @@ def main(args: argparse.Namespace):
         args.label_file.write_text("\n".join(label))
 
     # 生成数据集
+    progress_bar = tqdm(desc="Generating dataset", total=args.batch_size * (args.train_iterations + args.validation_iterations))
     for dataset_split, num_iterations in [("train", args.train_iterations), ("valid", args.validation_iterations)]:
         image_dir, label_dir = [args.output_dir / data_type / dataset_split for data_type in ["images", "labels"]]
         image_dir.mkdir(parents=True, exist_ok=True)
         label_dir.mkdir(parents=True, exist_ok=True)
 
-        for _ in tqdm(range(num_iterations), desc=f"Generating {dataset_split} dataset"):
+        for _ in range(num_iterations):
             images, labels = generator.generate(args.batch_size)
             for batch_idx in range(args.batch_size):
                 file_id = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=16))
@@ -325,6 +326,7 @@ def main(args: argparse.Namespace):
                     f"{label.index(class_name)} {center_x:.6f} {center_y:.6f} {width:.6f} {height:.6f}"
                     for class_name, center_x, center_y, width, height in labels[batch_idx]
                 ))
+            progress_bar.update(args.batch_size)
 
 
 if __name__ == "__main__":
