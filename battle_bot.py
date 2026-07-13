@@ -264,7 +264,7 @@ class BattleBot:
             leave_one_alive = alive - will_die == 1, alive - len(window) == 1
 
         return (
-            # 攻击之后，玩家会死吗
+            # 攻击之后，玩家还活着吗
             self.api.get_player_health() > self.__predict_damage_to_player(skill_id),
             # 有多可能只留下一个怪兽。不适用时为 None
             leave_one_alive,
