@@ -356,7 +356,7 @@ class BattleBot:
                 return action
 
     def __boss_debuff(self, bosses: list[tuple[int, Monster]]) -> BaseAction | None:
-        for monster_idx, _ in bosses:
+        for monster_idx, _ in sorted(bosses, key=lambda x: x[1].health, reverse=True):
             # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
             if action := self.__control_monster(monster_idx, with_sleep=False):
                 return action
