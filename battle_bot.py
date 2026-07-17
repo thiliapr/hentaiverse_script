@@ -223,8 +223,8 @@ class BattleBot:
                 damage = res.group(1)
             elif res := re.search(r".+ uses .+, and [a-z]+s you for (\d+) \w+ damage", log):
                 damage = res.group(1)
-            elif res := re.search(r".+ [a-z]+s you, causing (\d+) points of \w+ damage", log):
-                damage = res.group(1)
+            elif res := re.search(r".+ [a-z]+s you(; you partially parry the attack)?,( and)? (causing|take) (\d+) points of \w+ damage", log):
+                damage = res.group(4)
             elif res := re.search(r".+ [a-z]+s .+, which [a-z]+s! You( resist the attack, and)? take (\d+) \w+ damage", log):
                 damage = res.group(2)
             # 累积计算平均伤害
