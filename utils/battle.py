@@ -254,11 +254,12 @@ class BattleAPI:
             if res := re.search(r"(.+?) (resists, and)? was \w+ for (\d+) \w+ damage", log):
                 (monster_name, _, damage), source = res.groups(), "action"
             # Smite hits Natsuiro Matsuri for 19890604 seiso damage.
-            elif res := re.search(r".+ [a-z]+s (.+) for (\d+) (\w+ )?damage", log):
+            elif res := re.search(r".+ [a-z]+s (.+) for (\d+)( \w+)?damage", log):
                 (monster_name, damage, _), source = res.groups(), "action"
             # Arcane Blow hits Natsuiro Matsuri, which partially parries, causing 114514 points of Seiso damage.
-            elif res := re.search(r".+ [a-z]+s (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log):
-                (monster_name, _, damage), source = res.groups(), "action"
+            # Void Strike hits Natsuiro Matsuri, causing 19890604 additional points of Void damage.
+            elif res := re.search(r".+ [a-z]+s (.+?)(, which partially parries)?, causing (\d+)( \w+)? points of \w+ damage", log):
+                (monster_name, _, damage, _), source = res.groups(), "action"
             # You hit Natsuiro Matsuri, causing 8964 points of Seiso damage.
             elif res := re.search(r"You [a-z]+ (.+?)(, which partially parries)?, causing (\d+) points of \w+ damage", log):
                 (monster_name, _, damage), source = res.groups(), "action"
