@@ -157,6 +157,9 @@ class BattleBot:
             for _, monster in self.__get_alive_monsters()
         )
 
+    def __sort_monsters_by_health(self, monsters: list[tuple[int, Monster]]) -> list[tuple[int, Monster]]:
+        return sorted(monsters, key=lambda x: x[1].health, reverse=True)
+
     def __predict_damage_to_monster(self, skill_id: str, monster: Monster) -> float:
         skill_base_damage = self.game_data.skill_damage_base.get(skill_id, EmptyEWMAData).get_current_average(19890604)
         multiplier = self.game_data.skill_monster_damage_multiplier.get(f"{skill_id}@{monster.monster_id}", EmptyEWMAData).get_current_average(1)
@@ -290,6 +293,17 @@ class BattleBot:
         ), None):
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
 
+    def __buff_monsters(self, monsters: list[tuple[int, Monster]], magic_and_effects: list[tuple[str, str]]) -> ActionMagic | None:
+        # 按顺序施展控制效果
+        for monster_idx, monster in self.__sort_monsters_by_health(monsters):
+            for magic_name, effect_name in magic_and_effects:
+                # 怪兽已经有这个 Debuff 就不用叠了，叠下一个
+                if BattleBot.__has_effect(effect_name, monster.effects):
+                    continue
+                # 给怪兽叠 Debuff
+                if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
+                    return action
+
     def __heal(self, critical: bool) -> tuple[BaseAction | None, bool]:
         # 便宜回血
         action_cure = None
@@ -335,41 +349,29 @@ class BattleBot:
         if action_scores:
             return action_scores
 
-    def __control_monster(self, monster_idx: int, with_sleep: bool) -> ActionMagic | None:
-        control_magic_and_effect = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
+    def __control_monsters(self, monsters: list[tuple[int, Monster]], with_sleep: bool) -> ActionMagic | None:
+        control_magic_and_effects = [("Silence", "Silenced"), ("Weaken", "Weakened"), ("Blind", "Blinded")]
         if with_sleep:
-            control_magic_and_effect.insert(0, ("Sleep", "Asleep"))
+            control_magic_and_effects.insert(0, ("Sleep", "Asleep"))
 
         # 检测是否需要使用控制效果。如果已经拥有最佳效果，那就不需要使用了（一个效果控制整个怪兽，不需要叠其他控制 Debuff 了）；否则，给怪兽叠一个 Debuff（强度不够，得和其他控制 Debuff 配合着用）
-        best_effect = control_magic_and_effect[0][1]
-        monster = self.api.monsters[monster_idx]
-        if BattleBot.__has_effect(best_effect, monster.effects):
-            return
+        best_effect = control_magic_and_effects[0][1]
+        monsters = [
+            (monster_idx, monster)
+            for monster_idx, monster in monsters
+            if not BattleBot.__has_effect(best_effect, monster.effects)
+        ]
 
-        # 按顺序施展控制效果
-        for magic_name, effect_name in control_magic_and_effect:
-            # 怪兽已经有这个 Debuff 就不用叠了，叠下一个
-            if BattleBot.__has_effect(effect_name, monster.effects):
-                continue
-            # 给怪兽叠 Debuff
-            if action := self.__try_to_use("magic", magic_name, target=BattleAPI.MONSTER_START_ID + monster_idx):
-                return action
+        # 施展控制效果
+        return self.__buff_monsters(monsters, control_magic_and_effects)
 
-    def __boss_debuff(self, bosses: list[tuple[int, Monster]]) -> BaseAction | None:
-        for monster_idx, _ in sorted(bosses, key=lambda x: x[1].health, reverse=True):
-            # 打 Boss 不能用 Sleep，因为 Asleep Debuff 一碰就会消失，只应该在回血（不会攻击到怪兽）时用
-            if action := self.__control_monster(monster_idx, with_sleep=False):
-                return action
+    def __boss_debuff(self, bosses: list[tuple[int, Monster]]) -> ActionMagic | None:
+        if action := self.__control_monsters(bosses, with_sleep=False):
+            return action
 
         # 如果所有怪兽都被叠了控制 Debuff，那么就给他们叠破防 Debuff
-        if not all(BattleBot.__has_effect("Silenced", self.api.monsters[idx].effects) for idx, _ in bosses):
-            return
-
-        for monster_idx, monster in bosses:
-            if BattleBot.__has_effect("Imperiled", monster.effects):
-                continue
-            if action := self.__try_to_use("magic", "Imperil", target=BattleAPI.MONSTER_START_ID + monster_idx):
-                return action
+        if all(BattleBot.__has_effect("Silenced", self.api.monsters[idx].effects) for idx, _ in bosses):
+            return self.__buff_monsters(bosses, [("Drain", "Vital Theft"), ("Imperil", "Imperiled")])
 
     def __require_restore_before_end(self) -> bool:
         require_restore = self.api.get_player_health() < self.config.pre_battle_health_reserve
@@ -380,7 +382,7 @@ class BattleBot:
 
     def __restore_before_end(self) -> BaseAction | None:
         # 给敌人打麻药
-        if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
+        if action := self.__control_monsters(self.__get_alive_monsters(), with_sleep=True):
             return action
 
         # 尝试回血到期望值
@@ -402,7 +404,7 @@ class BattleBot:
             return
 
         # 控制怪兽
-        if action := self.__control_monster(self.__get_alive_monsters()[0][0], with_sleep=True):
+        if action := self.__control_monsters(self.__get_alive_monsters(), with_sleep=True):
             self.__grind_proficiency_attrs.add("deprecating")
             return action
 
@@ -571,9 +573,7 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
 
     # 加载战斗数据和配置文件
     config, game_data, monster_damage_to_player = [json.loads(path.read_text("utf-8")) if path.exists() else None for path in [config_path, game_data_path, monster_damage_to_player_path]]
-    game_data["monster_damage_to_player"] = EWMAData().model_dump()
-    if monster_damage_to_player:
-        game_data["monster_damage_to_player"] = monster_damage_to_player
+    game_data["monster_damage_to_player"] = monster_damage_to_player or EmptyEWMAData.model_dump()
 
     # 创建 API
     auth_config = AuthenticationConfig.model_validate(config["authentication"])
