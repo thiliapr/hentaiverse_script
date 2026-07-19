@@ -237,7 +237,9 @@ class BattleAPI:
 
     @staticmethod
     def __parse_effect(effect_str: str) -> BaseEffect:
-        name, description, remaining_turns = re.search(r"battle\.set_infopane_effect\('([^']+)',\s*'([^']+)',\s*([^)]+)\)", effect_str).groups()
+        name, description, remaining_turns = re.search(r"battle\.set_infopane_effect\('(.+)',\s*'(.+)',\s*(.+)\)", effect_str).groups()
+        description = description.encode().decode("unicode_escape")
+
         # 有些 Effect 是永久性的（触发效果才消失），比如 battle.set_infopane_effect('Absorbing Ward', 'The next magical attack against the target has a chance to be absorbed and partially converted to MP.', 'permanent')
         try:
             return TemporaryEffect(name=name, description=description, remaining_turns=remaining_turns)
@@ -316,8 +318,8 @@ class BattleAPI:
             # 如果这一行是魔法，就遍历每一个魔法，扒出其中的信息
             # 可点击的就是可用的，反之亦然
             for magic_element in row.find_all(class_="btsd"):
-                name, description, mana_cost, cooldown = re.search(r"battle\.set_infopane_spell\('([^']+)', '([^']+)', '\w+', (\d+), \d+, (\d+)\)", magic_element.attrs["onmouseover"]).groups()
-                magic_skills.append(Magic(name=name, available="onclick" in magic_element.attrs, skill_id=magic_element.attrs["id"], description=description, mana_cost=mana_cost, cooldown=cooldown, category=current_category))
+                name, description, mana_cost, cooldown = re.search(r"battle\.set_infopane_spell\('(.+)', '(.+)', '\w+', (\d+), \d+, (\d+)\)", magic_element.attrs["onmouseover"]).groups()
+                magic_skills.append(Magic(name=name, available="onclick" in magic_element.attrs, skill_id=magic_element.attrs["id"], description=description.encode().decode("unicode_escape"), mana_cost=mana_cost, cooldown=cooldown, category=current_category))
         return magic_skills
 
     def get_player_items(self) -> list[BaseItem]:
@@ -329,7 +331,7 @@ class BattleAPI:
 
             # 如果物品可以点击，那么就是可用的，否则就是不可用的
             if "onclick" in item_element.attrs:
-                skill_id, = re.search(r"battle\.set_friendly_skill\('([^']+)'\)", item_element.attrs["onclick"]).groups()
+                skill_id, = re.search(r"battle\.set_friendly_skill\('(.+)'\)", item_element.attrs["onclick"]).groups()
                 items.append(AvailableItem(name=item_element.text, skill_id=skill_id))
             else:
                 items.append(UnavailableItem(name=item_element.text))
