@@ -94,7 +94,7 @@ class ActionDefend(BaseAction):
         return "Defend"
 
 
-ActionScore = tuple[int | float | bool, ...]
+ActionScore = int | tuple[int | float | bool, ...]
 
 
 class BattleBotConfig(BaseModel):
@@ -486,7 +486,7 @@ class BattleBot:
 
         return textlog
 
-    def decide(self) -> list[tuple[BaseAction, ActionScore | int]]:
+    def decide(self) -> list[tuple[BaseAction, ActionScore]]:
         # 敌人血厚时，要有持续回血、回蓝的 Buff
         if self.draught_buff:
             for item_name, effect_name in [("Health Draught", "Regeneration"), ("Mana Draught", "Replenishment"), ("Spirit Draught", "Refreshment")]:
