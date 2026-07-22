@@ -10,7 +10,7 @@
 
 import re
 import enum
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 from collections.abc import Callable
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -19,6 +19,7 @@ from utils.network import request_with_retry
 from utils.constants import MAIN_URL
 
 
+# 游戏数据模型
 class Magic(BaseModel):
     name: str = Field(description="显示名称")
     available: bool = Field(description="目前是否可用")
@@ -68,6 +69,7 @@ class Monster(BaseModel):
     effects: list[BaseEffect] = Field([], description="怪兽身上的各种 Buff")
 
 
+# 战斗 API 相关模型
 class BattleResult(enum.Enum):
     IN_PROGRESS = enum.auto()
     VICTORY = enum.auto()
@@ -86,6 +88,27 @@ class AuthenticationConfig(BaseModel):
     user_agent: str | None = None
 
 
+# 数据解析模型
+class TextLogParsedData(BaseModel):
+    pass
+
+
+TextLogParsedDataT = TypeVar("TextLogParsedDataT", bound=TextLogParsedData)
+
+
+class TextLogParseResult(BaseModel, Generic[TextLogParsedDataT]):
+    textlog: str = Field(..., description="原始战斗记录")
+    category: str = Field(..., description="解析数据的类型")
+    parsed_data: TextLogParsedDataT = Field(..., description="解析出的信息")
+
+
+class DamageToMonsterParsedData(TextLogParsedData):
+    monster_name: str = Field(..., description="受伤怪兽的名字")
+    damage: int = Field(..., description="怪兽受到的伤害")
+    source: Literal["action", "effect"] = Field(..., description="伤害的来源")
+
+
+# API
 class BattleAPI:
     PLAYER_ID = 0
     MONSTER_START_ID = 1
@@ -116,6 +139,7 @@ class BattleAPI:
 
         # 初始化钩子列表
         self.__post_action_hooks = []
+        self.__post_textlog_parse_hooks = []
 
     def __do_action(self, action: dict[str, int | str]) -> list[str]:
         # 补充信息
@@ -194,11 +218,16 @@ class BattleAPI:
         # 你问我为什么不直接从 pane_monsters 拿？只能拿得到比例啊！
         monster_name_to_idx = {monster.name: i for i, monster in enumerate(self.monsters)}
 
-        # 逐条查看本次动作的战斗记录，如果发现伤害承受者是在场怪兽，就更新相应怪兽的血量
-        for monster_name, damage, _ in BattleAPI.parse_damage(textlog):
-            if monster_name in monster_name_to_idx:
-                monster = self.monsters[monster_name_to_idx[monster_name]]
-                monster.health = int(max(monster.health - damage, 0))
+        # 逐条查看本次动作的战斗记录
+        for damage_info in BattleAPI.parse_damage(textlog):
+            # 如果发现伤害承受者是在场怪兽，就更新相应怪兽的血量
+            if (monster_idx := monster_name_to_idx.get(damage_info.parsed_data.monster_name)) is not None:
+                monster = self.monsters[monster_idx]
+                monster.health = max(monster.health - damage_info.parsed_data.damage, 0)
+
+                # 执行钩子
+                for callback in self.__post_textlog_parse_hooks:
+                    callback(self, damage_info)
 
     def __update_monster_info(self):
         # 每次获取的时候，先更新一下状态
@@ -247,7 +276,7 @@ class BattleAPI:
             return PermanentEffect(name=name, description=description)
 
     @staticmethod
-    def parse_damage(logs: list[str]) -> list[tuple[str, int, Literal["action", "effect"]]]:
+    def parse_damage(logs: list[str]) -> list[TextLogParseResult[DamageToMonsterParsedData]]:
         damages = []
         for log in logs:
             monster_name = damage = source = None
@@ -256,7 +285,7 @@ class BattleAPI:
             if res := re.search(r"(.+?) (resists, and)? was \w+ for (\d+) \w+ damage", log):
                 (monster_name, _, damage), source = res.groups(), "action"
             # Smite hits Natsuiro Matsuri for 19890604 seiso damage.
-            elif res := re.search(r".+ [a-z]+s (.+) for (\d+)( \w+)?damage", log):
+            elif res := re.search(r".+ [a-z]+s (.+) for (\d+)( \w+)? damage", log):
                 (monster_name, damage, _), source = res.groups(), "action"
             # Arcane Blow hits Natsuiro Matsuri, which partially parries, causing 114514 points of Seiso damage.
             # Void Strike hits Natsuiro Matsuri, causing 19890604 additional points of Void damage.
@@ -271,7 +300,7 @@ class BattleAPI:
 
             # 添加解析结果到伤害列表
             if monster_name:
-                damages.append((monster_name, int(damage), source))
+                damages.append(TextLogParseResult(textlog=log, category="damage_to_monster", parsed_data=DamageToMonsterParsedData(monster_name=monster_name, damage=damage, source=source)))
 
         return damages
 
@@ -339,3 +368,6 @@ class BattleAPI:
 
     def add_post_action_hook(self, callback: Callable[["BattleAPI", list[str]], Any]):
         self.__post_action_hooks.append(callback)
+
+    def add_post_textlog_parse_hook(self, callback: Callable[["BattleAPI", TextLogParseResult], Any]):
+        self.__post_textlog_parse_hooks.append(callback)

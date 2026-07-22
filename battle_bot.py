@@ -11,16 +11,17 @@
 import json, pathlib, random, re, argparse, math, winsound, time, requests
 from functools import partial
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from PIL import Image
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from riddle.inference import InferenceToolkit
-from utils.battle import BattleAPI, BattleResult, BaseEffect, AvailableItem, Magic, Monster, TokenNotFoundError, AuthenticationConfig
+from utils.battle import BattleAPI, BattleResult, BaseEffect, AvailableItem, Magic, Monster, TextLogParseResult, TextLogParsedData, TokenNotFoundError, AuthenticationConfig
 from utils.constants import MAIN_URL
 from utils.network import request_with_retry
 
 
+# 统计工具
 class EWMAData(BaseModel):
     weighted_sum: float = Field(0, description="所有历史数据的加权和")
     total_weight: float = Field(0, ge=0, description="所有历史数据的权重的和")
@@ -38,6 +39,7 @@ class EWMAData(BaseModel):
 EmptyEWMAData = EWMAData()
 
 
+# 游戏数据
 class GameData(BaseModel):
     skill_damage_base: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能的基础伤害值")
     skill_max_enemies_hit: dict[str, int] = Field(default_factory=dict, description="每个攻击技能最多能同时攻击到的怪兽数量")
@@ -47,6 +49,7 @@ class GameData(BaseModel):
     skill_monster_damage_multiplier: dict[str, EWMAData] = Field(default_factory=dict, description="每个攻击技能对特定怪物的伤害倍率。Key 的格式: '{skill_id}@{monster_id}'")
 
 
+# 游戏动作抽象
 class BaseAction(BaseModel, ABC):
     action_type: Literal["item", "magic", "attack", "defend"]
     attack_skill: bool = Field(False, description="该技能是否是攻击技能。如果是，则记录该动作造成的伤害")
@@ -97,6 +100,21 @@ class ActionDefend(BaseAction):
 ActionScore = int | tuple[int | float | bool, ...]
 
 
+# TextLog 解析
+class BattleProgressParsedData(TextLogParsedData):
+    current_rounds: int = Field(..., ge=1, description="目前所处的回合数")
+    total_rounds: int = Field(..., ge=1, description="战役的总回合数")
+
+
+class HealthRestoredParsedData(TextLogParsedData):
+    health_restored: int = Field(..., ge=0, description="回复了多少生命值")
+
+
+class DamageToPlayerParsedData(TextLogParsedData):
+    damage: int = Field(..., ge=0, description="对玩家造成的伤害")
+
+
+# Bot 及其配置
 class BattleBotConfig(BaseModel):
     elite_health_threshold: int = Field(gt=0, description="精英生物判定阈值，高于此值的怪兽被视为精英，并以特殊战术应对")
     critical_health_line: int = Field(gt=0, description="濒死判定线，低于此值将不计代价回血")
@@ -114,14 +132,22 @@ class BattleBotConfig(BaseModel):
 
 
 class BattleBot:
-    def __init__(self, api: BattleAPI, config: BattleBotConfig, game_data: GameData):
+    def __init__(self, api: BattleAPI, config: BattleBotConfig, game_data: GameData, post_textlog_parse_hooks: list[Callable[["BattleBot", list[str]], Any]] | None):
         self.api = api
         self.config = config
         self.game_data = game_data
         self.__init_ewma_multiplier()
-        self.__init_flags()
         self.__grind_proficiency_attrs = set()
 
+        # 外部扩展
+        self.__post_textlog_parse_hooks = []
+        for callback in post_textlog_parse_hooks or []:
+            self.add_post_textlog_parse_hook(callback)
+
+        # 根据游戏数据设定 Flag
+        self.__init_flags()
+
+    # 数据处理
     def __init_ewma_multiplier(self):
         for data in [
             *self.game_data.skill_damage_base.values(),
@@ -134,13 +160,27 @@ class BattleBot:
     def __new_ewma_data(self) -> EWMAData:
         return EWMAData(multiplier=self.config.ewma_multiplier)
 
+    # 外部扩展
+    def add_post_textlog_parse_hook(self, callback: Callable[["BattleBot", TextLogParseResult], Any]):
+        self.api.add_post_textlog_parse_hook(callback)
+        self.__post_textlog_parse_hooks.append(callback)
+
+    # 游戏逻辑
     def __init_flags(self):
         # 检测是否需要结束前回血、是否需要叠回血和回蓝 Buff
         self.__restore_before_end_flag = self.draught_buff = False
         if (result := re.search(r"Round (\d+) / (\d+)", self.api.logs[0][0])) is not None:
+            # 获取当前游戏进度
             current_rounds, total_rounds = [int(x) for x in result.groups()]
+            
+            # 根据游戏进度
             if current_rounds < total_rounds:
                 self.__restore_before_end_flag = self.draught_buff = True
+
+            # 汇报 TextLog 解析结果
+            parsed_result = TextLogParseResult(textlog=self.api.logs[0][0], category="battle_progress", parsed_data=BattleProgressParsedData(current_rounds=current_rounds, total_rounds=total_rounds))
+            for callback in self.__post_textlog_parse_hooks:
+                callback(self, parsed_result)
         if any(monster.health > self.config.elite_health_threshold for monster in self.api.monsters):
             self.draught_buff = True
 
@@ -175,53 +215,61 @@ class BattleBot:
 
     def __update_attack_data(self, action: ActionMagic | ActionAttack, textlog: list[str]):
         # 分析伤害
-        damage_info = []
-        for monster_name, damage, source in BattleAPI.parse_damage(textlog):
+        all_damage_info = []
+        for damage_info in BattleAPI.parse_damage(textlog):
             # 跳过非玩家操作直接造成的伤害
-            if source != "action":
+            if damage_info.parsed_data.source != "action":
                 continue
             # 获取怪兽在数据库的 ID、在战斗中的位置
             if (monster_info := next((
                 (monster_idx, monster.monster_id)
                 for monster_idx, monster in enumerate(self.api.monsters)
-                if monster.name == monster_name
+                if monster.name == damage_info.parsed_data.monster_name
             ), None)) is not None:
-                damage_info.append((*monster_info, damage))
-        if not damage_info:
+                all_damage_info.append((*monster_info, damage_info.parsed_data.damage))
+        if not all_damage_info:
             return
 
         # 更新技能数据（伤害和最大攻击范围）
-        monster_indices, _, damage_list = zip(*damage_info)
+        monster_indices, _, damage_list = zip(*all_damage_info)
         self.game_data.skill_damage_base.setdefault(action.skill_id, self.__new_ewma_data()).add_observation(sum(damage_list) / len(damage_list))
         self.game_data.skill_max_enemies_hit[action.skill_id] = max(max(monster_indices) - min(monster_indices) + 1, self.game_data.skill_max_enemies_hit.get(action.skill_id, 1))
 
         # 更新怪兽数据，用技能基础伤害的倍数表示
         skill_base_damage = self.game_data.skill_damage_base[action.skill_id].get_current_average()
-        for _, monster_id, damage in damage_info:
+        for _, monster_id, damage in all_damage_info:
             self.game_data.skill_monster_damage_multiplier.setdefault(f"{action.skill_id}@{monster_id}", self.__new_ewma_data()).add_observation(damage / skill_base_damage)
 
     def __update_recovery_data(self, action: ActionMagic | ActionItem, textlog: list[str]):
         # 捕获有回复生命的记录
-        health_restored = None
         for log in textlog:
             if res := re.search(r"Recovered (\d+) points of health", log):
                 health_restored = res.group(1)
             elif res := re.search(r"You are healed for (\d+) Health Points", log):
                 health_restored = res.group(1)
+            else:
+                continue
 
-        # 更新数据
-        if not health_restored:
+            # 更新数据
+            self.game_data.skill_recovery_amount[action.skill_id] = max(int(health_restored), self.game_data.skill_recovery_amount.get(action.skill_id, 0))
+
+            # 汇报 TextLog 解析结果
+            parsed_result = TextLogParseResult(textlog=log, category="health_restored", parsed_data=HealthRestoredParsedData(health_restored=health_restored))
+            for callback in self.__post_textlog_parse_hooks:
+                callback(self, parsed_result)
+            
+            # 一个技能应该只有一次回复
+            break
+        else:
             print("[battle_bot.BattleBot.__update_recovery_data] [TextLogReplay] ===== Begin of Replay ===")
             print("\n".join(textlog))
             print("[battle_bot.BattleBot.__update_recovery_data] [TextLogReplay] ===== End of Replay ===")
             raise RuntimeError("使用了回复魔法/物品，却找不到回复记录。这意味着存在回复记录规则的遗漏，请联系作者并把上面的记录发给作者修复（或者你自己加上去）")
-        self.game_data.skill_recovery_amount[action.skill_id] = max(int(health_restored), self.game_data.skill_recovery_amount.get(action.skill_id, 0))
 
     def __update_monster_damage(self, action: BaseAction, textlog: list[str]):
         total_damage = damage_count = 0
         for log in textlog:
-            # 获取伤害
-            damage = None
+            # 解析伤害
             if res := re.search(r".+ [a-z]+s you for (\d+) \w+ damage", log):
                 damage = res.group(1)
             elif res := re.search(r".+ uses .+, and [a-z]+s you for (\d+) \w+ damage", log):
@@ -230,10 +278,17 @@ class BattleBot:
                 damage = res.group(4)
             elif res := re.search(r".+ [a-z]+s .+, which [a-z]+s! You( resist the attack, and)? take (\d+) \w+ damage", log):
                 damage = res.group(2)
+            else:
+                continue
+
             # 累积计算平均伤害
-            if damage:
-                total_damage += int(damage)
-                damage_count += 1
+            total_damage += int(damage)
+            damage_count += 1
+
+            # 汇报 TextLog 解析结果
+            parsed_result = TextLogParseResult(textlog=log, category="damage_to_player", parsed_data=DamageToPlayerParsedData(damage=damage))
+            for callback in self.__post_textlog_parse_hooks:
+                callback(self, parsed_result)
 
         # 更新数据
         if active_monsters := self.__get_active_monsters():
@@ -438,34 +493,6 @@ class BattleBot:
         # 返回可用动作
         return action_scores
 
-    @staticmethod
-    def display_situation_after_action(api: BattleAPI, textlog: list[str]):
-        def format_noun(noun: str, n: int) -> str:
-            return f"{n} {noun}" + ("s" if n > 1 else "")
-
-        def format_effects(effects: list[BaseEffect]) -> str:
-            return ", ".join(
-                (
-                    effect.name
-                    if effect.is_permanent
-                    else f"{effect.name} ({format_noun('Turn', effect.remaining_turns)})"
-                )
-                for effect in effects
-            )
-
-        # 提供战斗记录时打印
-        if textlog:
-            print("\n".join(textlog))
-
-        # 如果游戏继续，就打印现场情况，否则用分隔符表示游戏结束
-        if api.battle_result == BattleResult.IN_PROGRESS:
-            print("+ - " * 10)
-            print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
-            print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
-            print("# = " * 16)
-        else:
-            print("- - " * 20)
-
     def execute_action(self, action: BaseAction) -> list[str]:
         # 执行动作，获得战斗记录
         if action.action_type == "attack":
@@ -554,6 +581,64 @@ class BattleBot:
         return self.__auto_attack()
 
 
+# TextLog 解析结果和 BattleBot 的可视化工具
+class TextLogParseVisualization:
+    def __init__(self):
+        self.parsed_results = {}
+
+    def clear_results(self):
+        self.parsed_results.clear()
+
+    def add_parsed_result_callback(self, _: BattleAPI, parsed_result: TextLogParseResult):
+        self.parsed_results.setdefault(parsed_result.textlog, []).append(parsed_result)
+
+    def display_logs_and_clear(self, logs: list[str]):
+        for log in logs:
+            if not (parsed_results := self.parsed_results.get(log)):
+                print(log)
+                continue
+
+            # 如果 TextLog 在解析结果里，那么显示它的所有解析结果
+            print(f"[ParsedTextLog] {log}")
+            for parsed_result in parsed_results:
+                print(f"[ParsedResult::{parsed_result.category}] {parsed_result.parsed_data}")
+
+        # 清理 TextLog 解析数据，为下一次显示做准备
+        self.clear_results()
+
+
+class BattleBotVisualization:
+    def __init__(self, textlog_visualization: TextLogParseVisualization):
+        self.textlog_visualization = textlog_visualization
+
+    def display_situation_after_action(self, api: BattleAPI, textlog: list[str]):
+        def format_noun(noun: str, n: int) -> str:
+            return f"{n} {noun}" + ("s" if n > 1 else "")
+
+        def format_effects(effects: list[BaseEffect]) -> str:
+            return ", ".join(
+                (
+                    effect.name
+                    if effect.is_permanent
+                    else f"{effect.name} ({format_noun('Turn', effect.remaining_turns)})"
+                )
+                for effect in effects
+            )
+
+        # 提供战斗记录时打印
+        if textlog:
+            self.textlog_visualization.display_logs_and_clear(textlog)
+
+        # 如果游戏继续，就打印现场情况，否则用分隔符表示游戏结束
+        if api.battle_result == BattleResult.IN_PROGRESS:
+            print("+ - " * 10)
+            print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
+            print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
+            print("# = " * 16)
+        else:
+            print("- - " * 20)
+
+
 def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: dict[str, Any] | None = None) -> BattleResult:
     def format_action_info(action: BaseAction, score: ActionScore) -> str:
         if hasattr(action, "target"):
@@ -579,19 +664,20 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
     auth_config = AuthenticationConfig.model_validate(config["authentication"])
     api = BattleAPI(isekai, auth_config)
 
-    # 打印初始日志
-    print("= - " * 20)
-    BattleBot.display_situation_after_action(api, api.logs[0])
-
-    # 使每次 do_action 都实时显示 log
-    api.add_post_action_hook(BattleBot.display_situation_after_action)
+    # 初始化可视化工具
+    textlog_parse_visualization = TextLogParseVisualization()
+    battle_bot_visualization = BattleBotVisualization(textlog_parse_visualization)
 
     # 创建 Battle Bot
     battle_bot_config = BattleBotConfig.model_validate(config["battle_bot"])
     game_data = GameData.model_validate(game_data)
     for k, v in (config_override or {}).items():
         setattr(battle_bot_config, k, v)
-    battle_bot = BattleBot(api, battle_bot_config, game_data)
+    battle_bot = BattleBot(api, battle_bot_config, game_data, post_textlog_parse_hooks=[textlog_parse_visualization.add_parsed_result_callback])
+
+    # 打印初始日志
+    print("= - " * 20)
+    battle_bot_visualization.display_situation_after_action(api, api.logs[0])
 
     # 使用 Battle Bot 预测并执行动作
     last_execution_time = 0
@@ -611,8 +697,11 @@ def battle(isekai: bool, epsilon: float, difficult_level: str, config_override: 
         # https://ehwiki.org/wiki/Action_Speed
         if (interval := time.time() - last_execution_time) < 1 / 4:
             time.sleep(1 / 4 - interval)
-        battle_bot.execute_action(action)
+        textlog = battle_bot.execute_action(action)
         last_execution_time = time.time()
+
+        # 显示现场状况
+        battle_bot_visualization.display_situation_after_action(api, textlog)
 
     # 保存战斗数据
     game_data = game_data.model_dump()
