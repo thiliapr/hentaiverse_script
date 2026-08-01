@@ -323,7 +323,7 @@ class BattleBot:
 
         return (
             # 攻击之后，玩家还活着吗
-            self.api.get_player_health() > self.__predict_damage_to_player(skill_id),
+            self.api.player_health() > self.__predict_damage_to_player(skill_id),
             # 有多可能只留下一个怪兽。不适用时为 None
             leave_one_alive,
             # 多少个怪兽会死于这场攻击
@@ -382,12 +382,12 @@ class BattleBot:
     def __decrease_cooldown(self) -> list[ActionMagic, ActionScore] | None:
         def will_player_die(action: BaseAction) -> tuple[float, bool]:
             damage_to_player = self.__predict_damage_to_player(action.skill_id)
-            return damage_to_player, damage_to_player < self.api.get_player_health()
+            return damage_to_player, damage_to_player < self.api.player_health()
 
         # Higher action speed decreases the amount of time units an action takes. This will often lead to being able to perform more actions per tick. This will be most visible with buff durations, as it becomes possible to attack multiple times before the duration decreases by 1. Similarly, vital regeneration, be they from spells, items, or natural regeneration, are also only received when ticks happen. A monster having a high attack speed or an action performed by the player having a long action time, may allow monsters to attack multiple times in a single player action.
         # https://ehwiki.org/wiki/Action_Speed
         action_scores = []
-        for magic in self.api.get_player_magics():
+        for magic in self.api.player_magics():
             # 跳过不可用的魔法和不安全的魔法（攻击魔法）
             if not magic.available or magic.category not in ["magic_support", "magic_curative"]:
                 continue
@@ -429,10 +429,10 @@ class BattleBot:
             return self.__buff_monsters(bosses, [("Drain", "Vital Theft"), ("Imperil", "Imperiled")])
 
     def __require_restore_before_end(self) -> bool:
-        require_restore = self.api.get_player_health() < self.config.pre_battle_health_reserve
-        require_restore = require_restore or self.api.get_player_mana() < self.config.pre_battle_mana_reserve
-        require_restore = require_restore or not all(magic.available for magic in self.api.get_player_magics() if magic.name in self.config.pre_battle_magics)
-        require_restore = require_restore or not all(item.available for item in self.api.get_player_items() if item.name in self.config.pre_battle_items)
+        require_restore = self.api.player_health() < self.config.pre_battle_health_reserve
+        require_restore = require_restore or self.api.player_mana() < self.config.pre_battle_mana_reserve
+        require_restore = require_restore or not all(magic.available for magic in self.api.player_magics() if magic.name in self.config.pre_battle_magics)
+        require_restore = require_restore or not all(item.available for item in self.api.player_items() if item.name in self.config.pre_battle_items)
         return self.__restore_before_end_flag and require_restore
 
     def __restore_before_end(self) -> BaseAction | None:
@@ -441,11 +441,11 @@ class BattleBot:
             return action
 
         # 尝试回血到期望值
-        if (self.api.get_player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)[0]):
+        if (self.api.player_health() < self.config.pre_battle_health_reserve) and (action := self.__heal(critical=False)[0]):
             return action
 
         # 尝试回蓝到期望值
-        if self.api.get_player_mana() < self.config.pre_battle_mana_reserve:
+        if self.api.player_mana() < self.config.pre_battle_mana_reserve:
             for item_name in ["Mana Gem", "Mana Potion"]:
                 if action := self.__try_to_use("item", item_name):
                     return action
@@ -478,7 +478,7 @@ class BattleBot:
             attack_target = BattleAPI.MONSTER_START_ID + monster_idx
 
             # 遍历每个魔法
-            for magic in self.api.get_player_magics():
+            for magic in self.api.player_magics():
                 if magic.category != "magic_damage" or not magic.available:
                     continue
 
@@ -517,16 +517,16 @@ class BattleBot:
         # 敌人血厚时，要有持续回血、回蓝的 Buff
         if self.draught_buff:
             for item_name, effect_name in [("Health Draught", "Regeneration"), ("Mana Draught", "Replenishment"), ("Spirit Draught", "Refreshment")]:
-                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("item", item_name)):
+                if not BattleBot.__has_effect(effect_name, self.api.player_effects()) and (action := self.__try_to_use("item", item_name)):
                     return [(action, 0)]
 
         # 药水回蓝、Spirit 
-        if self.api.get_player_mana() < self.config.mana_supply_line:
+        if self.api.player_mana() < self.config.mana_supply_line:
             for item_name in ["Mana Gem", "Mana Potion"]:
                 if action := self.__try_to_use("item", item_name):
                     return [(action, 0)]
 
-        if self.api.get_player_spirit() < self.config.spirit_supply_line:
+        if self.api.player_spirit() < self.config.spirit_supply_line:
             if action := self.__try_to_use("item", "Spirit Potion"):
                 return [(action, 0)]
 
@@ -536,7 +536,7 @@ class BattleBot:
                 return [(action, 0)]
 
         # 分情况进行急救回血和普通回血
-        if self.api.get_player_health() < self.config.critical_health_line:
+        if self.api.player_health() < self.config.critical_health_line:
             action, cure_is_worth_it = self.__heal(critical=True)
             if action:
                 return [(action, 0)]
@@ -544,7 +544,7 @@ class BattleBot:
             # 如果只是 Cure 在 CD（因为 Cure 的 CD 短，等得起），那就做一些消耗 CD 又动作快（不被太多怪兽攻击）的事情
             if cure_is_worth_it and (actions := self.__decrease_cooldown()):
                 return actions
-        if self.api.get_player_health() < self.config.normal_healing_line:
+        if self.api.player_health() < self.config.normal_healing_line:
             if action := self.__heal(critical=False)[0]:
                 return [(action, 0)]
 
@@ -554,12 +554,12 @@ class BattleBot:
                 if self.__require_restore_before_end():
                     return [(self.__restore_before_end(), 0)]
             # 耍戏，提升属性熟练度
-            elif self.api.get_player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
+            elif self.api.player_mana() > self.config.prof_mana_threshold and (action := self.__grind_proficiency()):
                 return [(action, 0)]
 
         # 如果可以撑过这回合，并且 Spirit 足够的话（Spark of Life 需要 Spirit 发挥作用），上保命 Buff
-        has_spark_buff = BattleBot.__has_effect("Spark of Life", self.api.get_player_effects())
-        if self.api.get_player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.get_player_spirit() >= self.config.spark_trigger_spirit and not has_spark_buff:
+        has_spark_buff = BattleBot.__has_effect("Spark of Life", self.api.player_effects())
+        if self.api.player_health() > self.__predict_damage_to_player("Magic:Spark of Life") and self.api.player_spirit() >= self.config.spark_trigger_spirit and not has_spark_buff:
             if action := self.__try_to_use("magic", "Spark of Life", target=BattleAPI.PLAYER_ID):
                 return [(action, 0)]
 
@@ -569,7 +569,7 @@ class BattleBot:
                 [("Haste", "Hastened"), ("Shadow Veil", "Shadow Veil"), ("Protection", "Protection"), ("Absorb", "Absorbing Ward"), ("Regen", "Regen")] + ([] if has_spark_buff else [("Spirit Shield", "Spirit Shield")]),
                 key=lambda x: self.__predict_damage_to_player(f"Magic:{x[0]}")
             ):
-                if not BattleBot.__has_effect(effect_name, self.api.get_player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
+                if not BattleBot.__has_effect(effect_name, self.api.player_effects()) and (action := self.__try_to_use("magic", magic_name, target=BattleAPI.PLAYER_ID)):
                     return [(action, 0)]
 
         # 如果场上仅存在 Boss 的话，给 Boss 加 Debuff
@@ -632,7 +632,7 @@ class BattleBotVisualization:
         # 如果游戏继续，就打印现场情况，否则用分隔符表示游戏结束
         if api.battle_result == BattleResult.IN_PROGRESS:
             print("+ - " * 10)
-            print(f"Player: Health={api.get_player_health()}; Mana={api.get_player_mana()}; Spirit={api.get_player_spirit()}; Effects={format_effects(api.get_player_effects())}")
+            print(f"Player: Health={api.player_health()}; Mana={api.player_mana()}; Spirit={api.player_spirit()}; Effects={format_effects(api.player_effects())}")
             print("\n".join(f"Monster {chr(ord('A') + monster_idx)}({monster.name}): Health={monster.health}; Mana={monster.mana / 1.2:.0f}%; Spirit={monster.spirit / 1.2:.0f}%; Effects={format_effects(monster.effects)}" for monster_idx, monster in enumerate(api.monsters) if monster.health))
             print("# = " * 16)
         else:

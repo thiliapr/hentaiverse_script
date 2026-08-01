@@ -316,24 +316,24 @@ class BattleAPI:
     def do_attack(self, target: int) -> list[str]:
         return self.__do_action({"mode": "attack", "target": target, "skill": 0})
 
-    def get_player_health(self) -> int:
+    def player_health(self) -> int:
         # 处于 Spark of Life 效果时，血量 ID 会变成 vrhd
         if health := self.__get_player_vital(["vrhb", "vrhd"]):
             return health
         # 在 Standard UI 下，血量显示在血量条中间，当血量过少时，血量条过短，就不会显示血量，这时候我们当作 1 血处理
         return 1
 
-    def get_player_mana(self) -> int:
+    def player_mana(self) -> int:
         # 无论是在任何模式，蓝量和 Spirit 都是显示在条外的，所以即使为零也会显示，不需要特殊处理
         return self.__get_player_vital(["vrm"])
 
-    def get_player_spirit(self) -> int:
+    def player_spirit(self) -> int:
         return self.__get_player_vital(["vrs"])
 
-    def get_player_effects(self) -> list[BaseEffect]:
+    def player_effects(self) -> list[BaseEffect]:
         return [BattleAPI.__parse_effect(effect_element.attrs["onmouseover"]) for effect_element in self.__containers["pane_effects"].find_all("img")]
 
-    def get_player_magics(self) -> list[Magic]:
+    def player_magics(self) -> list[Magic]:
         magic_skills = []
         current_category: str  # 应该在后面被定义。如果没有定义导致报错，那么就应该更新 API 以适应新的游戏 UI 了
 
@@ -351,7 +351,7 @@ class BattleAPI:
                 magic_skills.append(Magic(name=name, available="onclick" in magic_element.attrs, skill_id=magic_element.attrs["id"], description=description.encode().decode("unicode_escape"), mana_cost=mana_cost, cooldown=cooldown, category=current_category))
         return magic_skills
 
-    def get_player_items(self) -> list[BaseItem]:
+    def player_items(self) -> list[BaseItem]:
         items = []
         for item_container in self.__containers["pane_item"].find_all(class_="bti3"):
             # 跳过没有物品的容器
