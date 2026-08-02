@@ -343,7 +343,7 @@ class BattleBot:
     def __try_to_use(self, category: Literal["magic", "item"], name: str, **kwargs) -> ActionItem | ActionMagic | None:
         if thing := next((
             thing
-            for thing in getattr(self.api, f"get_player_{category}s")()
+            for thing in getattr(self.api, f"player_{category}s")()
             if thing.name == name and thing.available
         ), None):
             return globals()[f"Action{category.capitalize()}"](**({category: thing} | kwargs))
