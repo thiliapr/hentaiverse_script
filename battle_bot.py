@@ -311,7 +311,11 @@ class BattleBot:
         actual_damage_taken = {idx: min(damage, self.api.monsters[idx].health) for idx, damage in raw_damage_dealt.items()}
         will_die = sum(actual_damage_taken.get(idx, 0) >= monster.health for idx, monster in window)
         kill_deficit = 0
-        if survivor_healths := [x for x in [monster.health - actual_damage_taken.get(idx, 0) for idx, monster in enumerate(self.api.monsters)] if x]:
+        if survivor_healths := [
+            remaining_health
+            for idx, monster in enumerate(self.api.monsters)
+            for remaining_health in [monster.health - actual_damage_taken.get(idx, 0)] if remaining_health
+        ]:
             kill_deficit = min(survivor_healths)
         damage_sum = sum(actual_damage_taken.values())
 

@@ -130,7 +130,11 @@ class BattleAPI:
         self.logs = [initial_logs]
 
         # 解析获取怪兽信息，按怪物出场的顺序排序，A 最先出场，B 第二个出场，以此类推
-        monsters_info = sorted([x.groups() for x in [re.search(r"Spawned Monster ([A-Z]): MID=([0-9]+) \(([^)]+)\) LV=(\d+) HP=(\d+)", log) for log in initial_logs] if x], key=lambda x: x[0])
+        monsters_info = sorted([
+            result.groups()
+            for log in initial_logs
+            for result in [re.search(r"Spawned Monster ([A-Z]): MID=([0-9]+) \(([^)]+)\) LV=(\d+) HP=(\d+)", log)] if result
+        ], key=lambda x: x[0])
         self.monsters = [Monster(name=name, monster_id=monster_id, level=level, health=health) for _, monster_id, name, level, health in monsters_info]
         self.__update_monster_info()
 
