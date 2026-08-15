@@ -525,11 +525,15 @@ def main():
         _, params = bot.get_settings()
         bot.update_settings(params | {"fontlocal": "on"})
 
+    # 循环反复
+    last_world = "Persistent"
     while True:
-        for world, bot in [("Persistent", persistent_bot), ("Isekai", isekai_bot)]:
+        # 让上次后执行任务的世界，在这次也后执行任务
+        for world, bot in sorted([("Persistent", persistent_bot), ("Isekai", isekai_bot)], key=lambda x: x[0] == last_world):
             # 跳过未启用的 Bot
             if not bot.enabled:
                 continue
+            last_world = world
             # 成功进行战斗后，记录战斗结果
             if result := bot.task():
                 log_battle_result(world, result)
