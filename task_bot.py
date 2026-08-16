@@ -106,6 +106,11 @@ class BaseBot(ABC):
 
         return stamina, arena_list
 
+    # 外部使用
+    def get_stamina(self) -> int:
+        stamina, _ = self.get_arena_list("?s=Battle&ss=ar")
+        return stamina
+
     # 自动化任务
     def repair_equipment(self) -> bool:
         url = f"{self.main_url}/?s=Bazaar&ss=am&screen=repair&filter=equipped"
@@ -526,14 +531,12 @@ def main():
         bot.update_settings(params | {"fontlocal": "on"})
 
     # 循环反复
-    last_world = "Persistent"
     while True:
-        # 让上次后执行任务的世界，在这次也后执行任务
-        for world, bot in sorted([("Persistent", persistent_bot), ("Isekai", isekai_bot)], key=lambda x: x[0] == last_world):
+        # 优先执行体力较高的世界的任务，防止体力恢复到 99 浪费
+        for world, bot in sorted([("Persistent", persistent_bot), ("Isekai", isekai_bot)], key=lambda x: x[1].get_stamina(), reverse=True):
             # 跳过未启用的 Bot
             if not bot.enabled:
                 continue
-            last_world = world
             # 成功进行战斗后，记录战斗结果
             if result := bot.task():
                 log_battle_result(world, result)
